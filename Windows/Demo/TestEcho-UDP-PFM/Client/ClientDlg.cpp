@@ -303,12 +303,16 @@ void CClientDlg::OnBnClickedStop()
 {
 	SetAppState(ST_STOPPING);
 
+	::LogClientStopping(m_vtClients.Size());
+
 	for(size_t i = 0; i < m_vtClients.Size(); i++)
 	{
 		CUdpClientPtr* pSocket = m_vtClients[i];
 
 		if((*pSocket)->Stop())
-			::LogClientStopping((DWORD)i + 1);
+		{
+
+		}
 		//else
 		//	ASSERT(FALSE);
 	}
@@ -350,7 +354,7 @@ LRESULT CClientDlg::OnUserInfoMsg(WPARAM wp, LPARAM lp)
 
 EnHandleResult CClientDlg::OnPrepareConnect(IUdpClient* pSender, CONNID dwConnID, SOCKET socket)
 {
-	VERIFY(::SYS_SSO_RecvBuffSize(socket, 64 * 1024) == NO_ERROR);
+	VERIFY(::SYS_SSO_RecvBuffSize(socket, 256 * 1024) == NO_ERROR);
 
 	return HR_OK;
 }

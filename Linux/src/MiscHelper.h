@@ -2,11 +2,11 @@
  * Copyright: JessMA Open Source (ldcsaa@gmail.com)
  *
  * Author	: Bruce Liang
- * Website	: http://www.jessma.org
- * Project	: https://github.com/ldcsaa
+ * Website	: https://github.com/ldcsaa
+ * Project	: https://github.com/ldcsaa/HP-Socket
  * Blog		: http://www.cnblogs.com/ldcsaa
  * Wiki		: http://www.oschina.net/p/hp-socket
- * QQ Group	: 75375912, 44636872
+ * QQ Group	: 44636872, 75375912
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -58,7 +58,7 @@ template<typename B = void> struct TPackInfo
 
 typedef TPackInfo<TBuffer>	TBufferPackInfo;
 
-BOOL AddPackHeader(const WSABUF * pBuffers, int iCount, unique_ptr<WSABUF[]>& buffers, DWORD dwMaxPackSize, USHORT usPackHeaderFlag, DWORD& header);
+BOOL AddPackHeader(const WSABUF * pBuffers, int iCount, unique_ptr<WSABUF[]>& buffers, DWORD dwMaxPackSize, USHORT usPackHeaderFlag, DWORD& dwHeader);
 
 template<class B> EnFetchResult FetchBuffer(B* pBuffer, BYTE* pData, int iLength)
 {
@@ -90,18 +90,18 @@ template<class B> EnFetchResult PeekBuffer(B* pBuffer, BYTE* pData, int iLength)
 	return result;
 }
 
-template<class T, class B, class S> EnHandleResult ParsePack(T* pThis, TPackInfo<B>* pInfo, B* pBuffer, S* pSocket, DWORD dwMaxPackSize, USHORT usPackHeaderFlag, const BYTE* pData, int iLength)
+template<class T, class B, class S> EnHandleResult ParsePack(T* pThis, TPackInfo<B>* pInfo, B* pBuffer, S* pSocket, DWORD dwMaxPackSize, USHORT usPackHeaderFlag)
 {
 	EnHandleResult rs = HR_OK;
 
-	pBuffer->Cat(pData, iLength);
-	iLength = pBuffer->Length();
-
 	int required = pInfo->length;
-	int remain	 = iLength;
+	int remain	 = pBuffer->Length();
 
 	while(remain >= required)
 	{
+		if(pSocket->IsPaused())
+			break;
+
 		remain -= required;
 		CBufferPtr buffer(required);
 
@@ -109,7 +109,7 @@ template<class T, class B, class S> EnHandleResult ParsePack(T* pThis, TPackInfo
 
 		if(pInfo->header)
 		{
-			DWORD header = *((DWORD*)(BYTE*)buffer);
+			DWORD header = ::HToLE32(*((DWORD*)(BYTE*)buffer));
 
 			if(usPackHeaderFlag != 0)
 			{
@@ -147,4 +147,11 @@ template<class T, class B, class S> EnHandleResult ParsePack(T* pThis, TPackInfo
 	}
 
 	return rs;
+}
+
+template<class T, class B, class S> EnHandleResult ParsePack(T* pThis, TPackInfo<B>* pInfo, B* pBuffer, S* pSocket, DWORD dwMaxPackSize, USHORT usPackHeaderFlag, const BYTE* pData, int iLength)
+{
+	pBuffer->Cat(pData, iLength);
+
+	return ParsePack(pThis, pInfo, pBuffer, pSocket, dwMaxPackSize, usPackHeaderFlag);
 }

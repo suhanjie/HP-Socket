@@ -2,11 +2,11 @@
  * Copyright: JessMA Open Source (ldcsaa@gmail.com)
  *
  * Author	: Bruce Liang
- * Website	: http://www.jessma.org
- * Project	: https://github.com/ldcsaa
+ * Website	: https://github.com/ldcsaa
+ * Project	: https://github.com/ldcsaa/HP-Socket/HP-Socket
  * Blog		: http://www.cnblogs.com/ldcsaa
  * Wiki		: http://www.oschina.net/p/hp-socket
- * QQ Group	: 75375912, 44636872
+ * QQ Group	: 44636872, 75375912
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -59,9 +59,13 @@ inline int ENSURE_ERROR(int def_code)	{int __le_ = ::GetLastError(); if(__le_ ==
 #define ENSURE_ERROR_CANCELLED			ENSURE_ERROR(ERROR_CANCELLED)
 #define TRIGGER(expr)					EXECUTE_RESET_ERROR((expr))
 
-#define CreateLocalObjects(T, n)		((T*)alloca(sizeof(T) * n))
+#define CreateLocalObjects(T, n)		((T*)alloca(sizeof(T) * (n)))
 #define CreateLocalObject(T)			CreateLocalObjects(T, 1)
 #define CallocObjects(T, n)				((T*)calloc((n), sizeof(T)))
+
+#define MALLOC(T, n)					((T*)malloc(sizeof(T) * (n)))
+#define REALLOC(p, T, n)				((T*)realloc((PVOID)(p), sizeof(T) * (n)))
+#define FREE(p)							free((PVOID)(p))
 
 #define ERROR_EXIT2(code, err)			EXIT((code), (err), __FILE__, __LINE__, __FUNCTION__)
 #define ERROR__EXIT2(code, err)			_EXIT((code), (err), __FILE__, __LINE__, __FUNCTION__)
@@ -90,15 +94,33 @@ typedef HANDLE							FD;
 
 inline BOOL IsStrEmptyA(LPCSTR lpsz)	{return (lpsz == nullptr || lpsz[0] == 0);}
 inline BOOL IsStrEmptyW(LPCWSTR lpsz)	{return (lpsz == nullptr || lpsz[0] == 0);}
+inline BOOL IsStrNotEmptyA(LPCSTR lpsz)	{return !IsStrEmptyA(lpsz);}
+inline BOOL IsStrNotEmptyW(LPCWSTR lpsz){return !IsStrEmptyW(lpsz);}
 inline LPCSTR SafeStrA(LPCSTR lpsz)		{return (lpsz != nullptr) ? lpsz : "";}
 inline LPCWSTR SafeStrW(LPCWSTR lpsz)	{return (lpsz != nullptr) ? lpsz : L"";}
 
 #ifdef _UNICODE
-	#define IsStrEmpty					IsStrEmptyW
-	#define SafeStr						SafeStrW
+	#define IsStrEmpty(lpsz)			IsStrEmptyW(lpsz)
+	#define IsStrNotEmpty(lpsz)			IsStrNotEmptyW(lpsz)
+	#define SafeStr(lpsz)				SafeStrW(lpsz)
 #else
-	#define IsStrEmpty					IsStrEmptyA
-	#define SafeStr						SafeStrA
+	#define IsStrEmpty(lpsz)			IsStrEmptyA(lpsz)
+	#define IsStrNotEmpty(lpsz)			IsStrNotEmptyA(lpsz)
+	#define SafeStr(lpsz)				SafeStrA(lpsz)
+#endif
+
+#define ARRAY_SIZE(arr)					_countof(arr)
+
+#ifndef __countof
+	#define __countof(arr)				ARRAY_SIZE(arr)
+#endif
+
+#ifndef MAX
+	#define MAX(a,b)					max(a,b)
+#endif
+
+#ifndef MIN
+	#define MIN(a,b)					min(a,b)
 #endif
 
 template<typename T> inline bool IS_HAS_ERROR(T v)
@@ -119,38 +141,3 @@ template<typename T1, typename T2> inline void CopyPlainObject(T1* p1, const T2*
 void EXIT(int iExitCode = 0, int iErrno = -1, LPCSTR lpszFile = nullptr, int iLine = 0, LPCSTR lpszFunc = nullptr, LPCSTR lpszTitle = nullptr);
 void _EXIT(int iExitCode = 0, int iErrno = -1, LPCSTR lpszFile = nullptr, int iLine = 0, LPCSTR lpszFunc = nullptr, LPCSTR lpszTitle = nullptr);
 void ABORT(int iErrno = -1, LPCSTR lpszFile = nullptr, int iLine = 0, LPCSTR lpszFunc = nullptr, LPCSTR lpszTitle = nullptr);
-
-// CP_XXX -> UNICODE
-BOOL CodePageToUnicode(int iCodePage, const char szSrc[], WCHAR szDest[], int& iDestLength);
-// UNICODE -> CP_XXX
-BOOL UnicodeToCodePage(int iCodePage, const WCHAR szSrc[], char szDest[], int& iDestLength);
-// GBK -> UNICODE
-BOOL GbkToUnicode(const char szSrc[], WCHAR szDest[], int& iDestLength);
-// UNICODE -> GBK
-BOOL UnicodeToGbk(const WCHAR szSrc[], char szDest[], int& iDestLength);
-// UTF8 -> UNICODE
-BOOL Utf8ToUnicode(const char szSrc[], WCHAR szDest[], int& iDestLength);
-// UNICODE -> UTF8
-BOOL UnicodeToUtf8(const WCHAR szSrc[], char szDest[], int& iDestLength);
-// GBK -> UTF8
-BOOL GbkToUtf8(const char szSrc[], char szDest[], int& iDestLength);
-// UTF8 -> GBK
-BOOL Utf8ToGbk(const char szSrc[], char szDest[], int& iDestLength);
-
-// 计算 Base64 编码后长度
-DWORD GuessBase64EncodeBound(DWORD dwSrcLen);
-// 计算 Base64 解码后长度
-DWORD GuessBase64DecodeBound(const BYTE* lpszSrc, DWORD dwSrcLen);
-// Base64 编码（返回值：0 -> 成功，-3 -> 输入数据不正确，-5 -> 输出缓冲区不足）
-int Base64Encode(const BYTE* lpszSrc, DWORD dwSrcLen, BYTE* lpszDest, DWORD& dwDestLen);
-// Base64 解码（返回值：0 -> 成功，-3 -> 输入数据不正确，-5 -> 输出缓冲区不足）
-int Base64Decode(const BYTE* lpszSrc, DWORD dwSrcLen, BYTE* lpszDest, DWORD& dwDestLen);
-
-// 计算 URL 编码后长度
-DWORD GuessUrlEncodeBound(const BYTE* lpszSrc, DWORD dwSrcLen);
-// 计算 URL 解码后长度
-DWORD GuessUrlDecodeBound(const BYTE* lpszSrc, DWORD dwSrcLen);
-// URL 编码（返回值：0 -> 成功，-3 -> 输入数据不正确，-5 -> 输出缓冲区不足）
-int UrlEncode(BYTE* lpszSrc, DWORD dwSrcLen, BYTE* lpszDest, DWORD& dwDestLen);
-// URL 解码（返回值：0 -> 成功，-3 -> 输入数据不正确，-5 -> 输出缓冲区不足）
-int UrlDecode(BYTE* lpszSrc, DWORD dwSrcLen, BYTE* lpszDest, DWORD& dwDestLen);

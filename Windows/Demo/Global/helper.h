@@ -40,6 +40,7 @@
 #define IPV6_LOOPBACK_ADDRESS	_T("::1")
 #define IPV4_ANY_ADDRESS		_T("0.0.0.0")
 #define IPV6_ANY_ADDRESS		_T("::")
+#define BROAD_CAST_ADDRESS		_T("255.255.255.255")
 
 enum EnAppState
 {
@@ -101,12 +102,17 @@ void LogServerStartFail(DWORD code, LPCTSTR lpszDesc, LPCTSTR lpszName = nullptr
 void LogServerStop(LPCTSTR lpszName = nullptr);
 void LogServerStopFail(DWORD code, LPCTSTR lpszDesc, LPCTSTR lpszName = nullptr);
 void LogClientStart(LPCTSTR lpszAddress, USHORT port, LPCTSTR lpszName = nullptr);
+void LogStarting(LPCTSTR lpszAddress, USHORT port, LPCTSTR lpszName = nullptr);
 void LogClientStarting(LPCTSTR lpszAddress, USHORT port, LPCTSTR lpszName = nullptr);
 void LogClientStartFail(DWORD code, LPCTSTR lpszDesc, LPCTSTR lpszName = nullptr);
+void LogStartFail(DWORD code, LPCTSTR lpszDesc, LPCTSTR lpszName = nullptr);
 void LogClientStopping(CONNID dwConnID, LPCTSTR lpszName = nullptr);
+void LogStopping(LPCTSTR lpszName = nullptr);
 void LogClientStopFail(DWORD code, LPCTSTR lpszDesc, LPCTSTR lpszName = nullptr);
+void LogSend(LPCTSTR lpszContent, LPCTSTR lpszName = nullptr);
 void LogSend(CONNID dwConnID, LPCTSTR lpszContent, LPCTSTR lpszName = nullptr);
 void LogClientSendFail(int iSequence, int iSocketIndex, DWORD code, LPCTSTR lpszDesc, LPCTSTR lpszName = nullptr);
+void LogSendFail(DWORD code, LPCTSTR lpszDesc, LPCTSTR lpszName = nullptr);
 void LogSendFail(CONNID dwConnID, DWORD code, LPCTSTR lpszDesc, LPCTSTR lpszName = nullptr);
 void LogDisconnect(CONNID dwConnID, LPCTSTR lpszName = nullptr);
 void LogDisconnectFail(CONNID dwConnID, LPCTSTR lpszName = nullptr);
@@ -121,10 +127,13 @@ void LogOnHandShake2(CONNID dwConnID, LPCTSTR lpszName = nullptr);
 void LogOnClose(CONNID dwConnID, LPCTSTR lpszName = nullptr);
 
 void PostOnSend(CONNID dwConnID, const BYTE* pData, int iLength, LPCTSTR lpszName = nullptr);
+void PostOnSendTo(CONNID dwConnID, LPCTSTR lpszAddress, USHORT usPort, const BYTE* pData, int iLength, LPCTSTR lpszName = nullptr);
 void PostOnReceive(CONNID dwConnID, const BYTE* pData, int iLength, LPCTSTR lpszName = nullptr);
+void PostOnReceiveFrom(CONNID dwConnID, LPCTSTR lpszAddress, USHORT usPort, const BYTE* pData, int iLength, LPCTSTR lpszName = nullptr);
 void PostOnReceiveCast(CONNID dwConnID, LPCTSTR lpszAddress, USHORT usPort, const BYTE* pData, int iLength, LPCTSTR lpszName = nullptr);
 void PostOnClose(CONNID dwConnID, LPCTSTR lpszName = nullptr);
 void PostOnError(CONNID dwConnID, int enOperation, int iErrorCode, LPCTSTR lpszName = nullptr);
+void PostOnError2(CONNID dwConnID, int enOperation, int iErrorCode, LPCTSTR lpszAddress, USHORT usPort, const BYTE* pBuffer, int iLength, LPCTSTR lpszName = nullptr);
 void PostOnAccept(CONNID dwConnID, LPCTSTR lpszAddress, USHORT usPort, BOOL bPass, LPCTSTR lpszName = nullptr);
 void PostOnAccept2(CONNID dwConnID, LPCTSTR lpszName = nullptr);
 void PostOnHandShake(CONNID dwConnID, LPCTSTR lpszName = nullptr);
@@ -169,6 +178,12 @@ BOOL SetCurrentPathToModulePath(HMODULE hModule = nullptr);
 
 extern int g_c_iVerifyMode;
 extern BOOL g_c_bNeedClientVerification;
+extern LPCSTR g_c_lpszPemCert;
+extern LPCSTR g_c_lpszPemKey;
+extern LPCSTR g_c_lpszCAPemCert;
+extern LPCSTR g_s_lpszPemCert;
+extern LPCSTR g_s_lpszPemKey;
+extern LPCSTR g_s_lpszCAPemCert;
 extern LPCTSTR g_c_lpszCAPemCertFileOrPath;
 extern LPCTSTR g_c_lpszPemCertFile;
 extern LPCTSTR g_c_lpszPemKeyFile;

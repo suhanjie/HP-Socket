@@ -2,11 +2,11 @@
 * Copyright: JessMA Open Source (ldcsaa@gmail.com)
 *
 * Author	: Bruce Liang
-* Website	: http://www.jessma.org
-* Project	: https://github.com/ldcsaa
+* Website	: https://github.com/ldcsaa
+* Project	: https://github.com/ldcsaa/HP-Socket
 * Blog		: http://www.cnblogs.com/ldcsaa
 * Wiki		: http://www.oschina.net/p/hp-socket
-* QQ Group	: 75375912, 44636872
+* QQ Group	: 44636872, 75375912
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -29,10 +29,43 @@
 #include "STLHelper.h"
 
 #include <pthread.h>
-
+#include <signal.h>
 #include <utility>
 
 using namespace std;
+
+/* Used to retry syscalls that can return EINTR. */
+#define NO_EINTR_EXCEPT_THR_INTR(exp) ({							\
+	long int _rc;													\
+	do {_rc = (long int)(exp);}										\
+	while (IS_HAS_ERROR(_rc) && IS_INTR_ERROR()						\
+			&& !::IsThreadInterrupted());							\
+    _rc; })
+
+#define NO_EINTR_EXCEPT_THR_INTR_INT(exp)	((int)NO_EINTR_EXCEPT_THR_INTR(exp))
+
+class __CThread_Interrupt_
+{
+public:
+	static const int SIG_NO = (_NSIG - 5);
+
+private:
+	friend BOOL IsThreadInterrupted();
+	template<typename T, typename P, typename R> friend class CThread;
+
+private:
+	static BOOL IsInterrupted();
+	static BOOL InitSigAction();
+	static void SignalHandler(int sig);
+
+private:
+	~__CThread_Interrupt_();
+
+private:
+	static BOOL sm_bInitFlag;
+};
+
+inline BOOL IsThreadInterrupted() {return __CThread_Interrupt_::IsInterrupted();}
 
 class __CFakeRunnerClass_ {};
 
@@ -42,14 +75,77 @@ public:
 	using F	 = R (T::*)(P*);
 	using SF = R (*)(P*);
 
+	struct TWorker
+	{
+		CThread* m_pThread;
+		BOOL	 m_bDetach;
+
+		T*	m_pRunner;
+		F	m_pFunc;
+		P*	m_pArg;
+
+	public:
+		static TWorker* Construct(CThread* pThread, T* pRunner, F pFunc, P* pArg)
+		{
+			return new TWorker(pRunner, pFunc, pArg);
+		}
+
+		static void Destruct(TWorker* pWorker)
+		{
+			if(pWorker != nullptr)
+				delete pWorker;
+		}
+
+		void CopyTo(TWorker& worker)
+		{
+			memcpy(&worker, this, sizeof(TWorker));
+		}
+
+		TWorker(CThread* pThread = nullptr, BOOL bDetach = FALSE, T* pRunner = nullptr, F pFunc = nullptr, P* pArg = nullptr)
+		: m_pThread(pThread), m_bDetach(bDetach), m_pRunner(pRunner), m_pFunc(pFunc), m_pArg(pArg)
+		{
+
+		}
+
+	public:
+		template<typename T_, typename R_, typename = enable_if_t<!is_same<T_, __CFakeRunnerClass_>::value && !is_void<R_>::value>>
+		PVOID Run(T_*, R_*)
+		{
+			return (PVOID)(UINT_PTR)((m_pRunner->*m_pFunc)(m_pArg));
+		}
+
+		template<typename T_, typename = enable_if_t<!is_same<T_, __CFakeRunnerClass_>::value>>
+		PVOID Run(T_*, PVOID)
+		{
+			(m_pRunner->*m_pFunc)(m_pArg);
+
+			return nullptr;
+		}
+
+		template<typename R_, typename = enable_if_t<!is_void<R_>::value>>
+		PVOID Run(__CFakeRunnerClass_*, R_*)
+		{
+			return (PVOID)(UINT_PTR)(*(SF*)&m_pFunc)(m_pArg);
+		}
+
+		PVOID Run(__CFakeRunnerClass_*, VOID*)
+		{
+			(*(SF*)&m_pFunc)(m_pArg);
+
+			return nullptr;
+		}
+	};
+
+	friend struct TWorker;
+
 public:
 
-	BOOL Start(SF pFunc, P* pArg = nullptr, const pthread_attr_t* pAttr = nullptr)
+	BOOL Start(SF pFunc, P* pArg = nullptr, BOOL bDetach = FALSE, const pthread_attr_t* pAttr = nullptr)
 	{
-		return Start((__CFakeRunnerClass_*)nullptr, *(F*)&pFunc, pArg, pAttr);
+		return Start((__CFakeRunnerClass_*)nullptr, *(F*)&pFunc, pArg, bDetach, pAttr);
 	}
 
-	BOOL Start(T* pRunner, F pFunc, P* pArg = nullptr, const pthread_attr_t* pAttr = nullptr)
+	BOOL Start(T* pRunner, F pFunc, P* pArg = nullptr, BOOL bDetach = FALSE, const pthread_attr_t* pAttr = nullptr)
 	{
 		int rs = ERROR_INVALID_STATE;
 
@@ -57,20 +153,38 @@ public:
 			::SetLastError(rs);
 		else
 		{
-			m_pRunner	= pRunner;
-			m_pFunc		= pFunc;
-			m_pArg		= pArg;
+			unique_ptr<TWorker> wkPtr = make_unique<TWorker>(this, bDetach, pRunner, pFunc, pArg);
+			wkPtr->CopyTo(m_Worker);
 
 			SetRunning(TRUE);
 
-			rs = pthread_create(&m_ulThreadID, pAttr, ThreadProc, (PVOID)this);
+			rs = pthread_create(&m_ulThreadID, pAttr, ThreadProc, (PVOID)wkPtr.get());
 
-			if(rs != NO_ERROR)
+			if(rs == NO_ERROR)
+				wkPtr.release();
+			else
 			{
 				Reset();
 				::SetLastError(rs);
 			}
 		}
+
+		return (rs == NO_ERROR);
+	}
+
+#if !defined(__ANDROID__)
+
+	BOOL Cancel()
+	{
+		int rs = NO_ERROR;
+
+		if(!IsRunning() || ::IsSelfThread(m_ulThreadID))
+			rs = ERROR_INVALID_STATE;
+		else
+			rs = pthread_cancel(m_ulThreadID);
+
+		if(rs != NO_ERROR)
+			::SetLastError(rs);
 
 		return (rs == NO_ERROR);
 	}
@@ -104,7 +218,34 @@ public:
 		return (rs == NO_ERROR);
 	}
 
-	BOOL Detatch()
+#else
+
+	BOOL Cancel()
+	{
+		SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
+		return FALSE;
+	}
+
+	BOOL Join(R* pResult = nullptr)
+	{
+		int rs = NO_ERROR;
+
+		if(!IsRunning() || ::IsSelfThread(m_ulThreadID))
+			rs = ERROR_INVALID_STATE;
+		else
+			rs = pthread_join(m_ulThreadID, (PVOID*)pResult);
+
+		if(rs == NO_ERROR)
+			SetRunning(FALSE);
+		else
+			::SetLastError(rs);
+
+		return (rs == NO_ERROR);
+	}
+
+#endif
+
+	BOOL Detach()
 	{
 		int rs = NO_ERROR;
 
@@ -121,80 +262,70 @@ public:
 		return (rs == NO_ERROR);
 	}
 
-	BOOL Cancel()
-	{
-		int rs = NO_ERROR;
-
-		if(!IsRunning() || ::IsSelfThread(m_ulThreadID))
-			rs = ERROR_INVALID_STATE;
-		else
-			rs = pthread_cancel(m_ulThreadID);
-
-		if(rs != NO_ERROR)
-			::SetLastError(rs);
-
-		return (rs == NO_ERROR);
-	}
-
 	void Reset()
 	{
 		SetRunning(FALSE);
 
-		m_ulThreadID = 0;
-		m_lNativeID	 = 0;
-		m_pRunner	 = nullptr;
-		m_pFunc		 = nullptr;
-		m_pArg		 = nullptr;
+		m_ulThreadID	= 0;
+		m_lNativeID		= 0;
+
+		::ZeroObject(m_Worker);
+	}
+
+	BOOL Interrupt()
+	{
+		if(!IsRunning())
+		{
+			SetLastError(ERROR_INVALID_STATE);
+			return FALSE;
+		}
+
+		return (IS_NO_ERROR(pthread_kill(m_ulThreadID, __CThread_Interrupt_::SIG_NO)));
 	}
 
 	void SetRunning(BOOL bRunning) {m_bRunning = bRunning;}
 
 	BOOL IsRunning		() const {return m_bRunning;}
-	T* GetRunner		() const {return m_pRunner;}
-	F GetFunc			() const {return m_pFunc;}
-	SF GetSFunc			() const {return *(SF*)&m_pFunc;}
-	P* GetArg			() const {return m_pArg;}
+	T* GetRunner		() const {return m_Worker.m_pRunner;}
+	F GetFunc			() const {return m_Worker.m_pFunc;}
+	SF GetSFunc			() const {return *(SF*)&m_Worker.m_pFunc;}
+	P* GetArg			() const {return m_Worker.m_pArg;}
 	THR_ID GetThreadID	() const {return m_ulThreadID;}
 	NTHR_ID GetNativeID	() const {return m_lNativeID;}
 
-	BOOL IsInMyThread		()					const {return IsMyThreadID(::GetCurrentThreadId());}
+	BOOL IsInMyThread		()					const {return IsMyThreadID(SELF_THREAD_ID);}
 	BOOL IsMyThreadID		(THR_ID ulThreadID)	const {return ::IsSameThread(ulThreadID, m_ulThreadID);}
 	BOOL IsMyNativeThreadID	(NTHR_ID lNativeID)	const {return ::IsSameNativeThread(lNativeID, m_lNativeID);}
 
 private:
 	static PVOID ThreadProc(LPVOID pv)
 	{
-		CThread* pThis		= (CThread*)pv;
-		pThis->m_lNativeID	= SELF_NATIVE_THREAD_ID;
+		UnmaskInterruptSignal();
 
-		return pThis->Run((T*)nullptr, (R*)nullptr);
+		__CThread_Interrupt_ tlsInterrupt;
+
+		TWorker* pWorker = (TWorker*)pv;
+
+		if(pWorker->m_bDetach)
+			pWorker->m_pThread->Detach();
+		else
+			pWorker->m_pThread->m_lNativeID = SELF_NATIVE_THREAD_ID;
+
+		PVOID pResult = pWorker->Run((T*)nullptr, (R*)nullptr);
+
+		TWorker::Destruct(pWorker);
+
+		return pResult;
 	}
 
-	template<typename T_, typename R_, typename = enable_if_t<!is_same<T_, __CFakeRunnerClass_>::value && !is_void<R_>::value>>
-	PVOID Run(T_*, R_*)
+	static void UnmaskInterruptSignal()
 	{
-		return (PVOID)(UINT_PTR)((m_pRunner->*m_pFunc)(m_pArg));
-	}
+		sigset_t ss;
 
-	template<typename T_, typename = enable_if_t<!is_same<T_, __CFakeRunnerClass_>::value>>
-	PVOID Run(T_*, PVOID)
-	{
-		(m_pRunner->*m_pFunc)(m_pArg);
+		sigemptyset(&ss);
+		sigaddset(&ss, __CThread_Interrupt_::SIG_NO);
 
-		return nullptr;
-	}
-
-	template<typename R_, typename = enable_if_t<!is_void<R_>::value>>
-	PVOID Run(__CFakeRunnerClass_*, R_*)
-	{
-		return (PVOID)(UINT_PTR)(*(SF*)&m_pFunc)(m_pArg);
-	}
-
-	PVOID Run(__CFakeRunnerClass_*, VOID*)
-	{
-		(*(SF*)&m_pFunc)(m_pArg);
-
-		return nullptr;
+		pthread_sigmask(SIG_UNBLOCK, &ss, nullptr);
 	}
 
 public:
@@ -207,7 +338,7 @@ public:
 	{
 		if(IsRunning())
 		{
-			Cancel();
+			Interrupt();
 			Join(nullptr);
 		}
 
@@ -219,11 +350,9 @@ public:
 private:
 	THR_ID	m_ulThreadID;
 	NTHR_ID	m_lNativeID;
-	T*		m_pRunner;
-	F		m_pFunc;
-	P*		m_pArg;
-
 	BOOL	m_bRunning;
+
+	TWorker	m_Worker;
 };
 
 template<class P = VOID, class R = UINT_PTR> using CStaticThread = CThread<__CFakeRunnerClass_, P, R>;

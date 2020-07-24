@@ -2,11 +2,11 @@
 * Copyright: JessMA Open Source (ldcsaa@gmail.com)
 *
 * Author	: Bruce Liang
-* Website	: http://www.jessma.org
-* Project	: https://github.com/ldcsaa
+* Website	: https://github.com/ldcsaa
+* Project	: https://github.com/ldcsaa/HP-Socket
 * Blog		: http://www.cnblogs.com/ldcsaa
 * Wiki		: http://www.oschina.net/p/hp-socket
-* QQ Group	: 75375912, 44636872
+* QQ Group	: 44636872, 75375912
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -28,9 +28,20 @@
 #include <netinet/tcp.h>
 #include <netinet/udp.h>
 
+#ifdef _ICONV_SUPPORT
+#include <iconv.h>
+#endif
+
+#ifndef SO_REUSEPORT
+	#define SO_REUSEPORT	15
+#endif
+
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
+
+static const BYTE s_szUdpCloseNotify[] = {0xBE, 0xB6, 0x1F, 0xEB, 0xDA, 0x52, 0x46, 0xBA, 0x92, 0x33, 0x59, 0xDB, 0xBF, 0xE6, 0xC8, 0xE4};
+static const int s_iUdpCloseNotifySize = ARRAY_SIZE(s_szUdpCloseNotify);
 
 const hp_addr hp_addr::ANY_ADDR4(AF_INET, TRUE);
 const hp_addr hp_addr::ANY_ADDR6(AF_INET6, TRUE);
@@ -98,7 +109,7 @@ BOOL GetSockAddr(LPCTSTR lpszAddress, USHORT usPort, HP_SOCKADDR& addr)
 {
 	if(addr.family != AF_INET && addr.family != AF_INET6)
 	{
-		::WSASetLastError(EADDRNOTAVAIL);
+		::WSASetLastError(ERROR_ADDRNOTAVAIL);
 		return FALSE;
 	}
 
@@ -156,7 +167,6 @@ BOOL GetSockAddrByHostName(LPCTSTR lpszHost, USHORT usPort, HP_SOCKADDR& addr)
 		return GetSockAddr(lpszHost, usPort, addr);
 
 	return GetSockAddrByHostNameDirectly(lpszHost, usPort, addr);
-
 }
 
 BOOL GetSockAddrByHostNameDirectly(LPCTSTR lpszHost, USHORT usPort, HP_SOCKADDR& addr)
@@ -166,7 +176,11 @@ BOOL GetSockAddrByHostNameDirectly(LPCTSTR lpszHost, USHORT usPort, HP_SOCKADDR&
 	addrinfo* pInfo	= nullptr;
 	addrinfo hints	= {0};
 
+#if defined(__ANDROID__)
+	hints.ai_flags		= 0;
+#else
 	hints.ai_flags		= AI_ALL;
+#endif
 	hints.ai_family		= addr.family;
 	hints.ai_socktype	= SOCK_STREAM;
 
@@ -196,7 +210,7 @@ BOOL GetSockAddrByHostNameDirectly(LPCTSTR lpszHost, USHORT usPort, HP_SOCKADDR&
 	if(isOK)
 		addr.SetPort(usPort);
 	else
-		::WSASetLastError(EHOSTUNREACH);
+		::WSASetLastError(ERROR_HOSTUNREACH);
 
 	return isOK;
 }
@@ -213,7 +227,7 @@ BOOL EnumHostIPAddresses(LPCTSTR lpszHost, EnIPAddrType enType, LPTIPAddr** lppp
 
 	if(usFamily == 0xFF)
 	{
-		::WSASetLastError(EAFNOSUPPORT);
+		::WSASetLastError(ERROR_AFNOSUPPORT);
 		return FALSE;
 	}
 
@@ -225,7 +239,7 @@ BOOL EnumHostIPAddresses(LPCTSTR lpszHost, EnIPAddrType enType, LPTIPAddr** lppp
 	{
 		if(usFamily != AF_UNSPEC && usFamily != usFamily2)
 		{
-			::WSASetLastError(EHOSTUNREACH);
+			::WSASetLastError(ERROR_HOSTUNREACH);
 			return FALSE;
 		}
 
@@ -372,6 +386,50 @@ BOOL GetSocketRemoteAddress(SOCKET socket, LPTSTR lpszAddress, int& iAddressLen,
 	return GetSocketAddress(socket, lpszAddress, iAddressLen, usPort, FALSE);
 }
 
+BOOL SetMultiCastSocketOptions(SOCKET sock, const HP_SOCKADDR& bindAddr, const HP_SOCKADDR& castAddr, int iMCTtl, BOOL bMCLoop)
+{
+	if(castAddr.IsIPv4())
+	{
+		BYTE ttl  = (BYTE)iMCTtl;
+		BYTE loop = (BYTE)bMCLoop;
+
+		VERIFY(::SSO_SetSocketOption(sock, IPPROTO_IP, IP_MULTICAST_TTL, &ttl, sizeof(ttl)) != SOCKET_ERROR);
+		VERIFY(::SSO_SetSocketOption(sock, IPPROTO_IP, IP_MULTICAST_LOOP, &loop, sizeof(loop)) != SOCKET_ERROR);
+
+		ip_mreq mcast;
+		::ZeroMemory(&mcast, sizeof(mcast));
+
+		mcast.imr_multiaddr = castAddr.addr4.sin_addr;
+		mcast.imr_interface = bindAddr.addr4.sin_addr;
+
+		if(::SSO_SetSocketOption(sock, IPPROTO_IP, IP_ADD_MEMBERSHIP, &mcast, sizeof(mcast)) == SOCKET_ERROR)
+			return FALSE;
+		if(::SSO_SetSocketOption(sock, IPPROTO_IP, IP_MULTICAST_IF, bindAddr.SinAddr(), sizeof(IN_ADDR)) == SOCKET_ERROR)
+			return FALSE;
+	}
+	else
+	{
+		INT ttl	  = (INT)iMCTtl;
+		UINT loop = (UINT)bMCLoop;
+
+		VERIFY(::SSO_SetSocketOption(sock, IPPROTO_IPV6, IPV6_MULTICAST_HOPS, &ttl, sizeof(ttl)) != SOCKET_ERROR);
+		VERIFY(::SSO_SetSocketOption(sock, IPPROTO_IPV6, IPV6_MULTICAST_LOOP, &loop, sizeof(loop)) != SOCKET_ERROR);
+
+		ipv6_mreq mcast;
+		::ZeroMemory(&mcast, sizeof(mcast));
+
+		mcast.ipv6mr_multiaddr = castAddr.addr6.sin6_addr;
+		mcast.ipv6mr_interface = bindAddr.addr6.sin6_scope_id;
+
+		if(::SSO_SetSocketOption(sock, IPPROTO_IPV6, IPV6_ADD_MEMBERSHIP, &mcast, sizeof(mcast)) == SOCKET_ERROR)
+			return FALSE;
+		if(::SSO_SetSocketOption(sock, IPPROTO_IPV6, IPV6_MULTICAST_IF, (PVOID)(&bindAddr.addr6.sin6_scope_id), sizeof(UINT)) == SOCKET_ERROR)
+			return FALSE;
+	}
+
+	return TRUE;
+}
+
 ULONGLONG NToH64(ULONGLONG value)
 {
 	return (((ULONGLONG)ntohl((UINT)((value << 32) >> 32))) << 32) | ntohl((UINT)(value >> 32));
@@ -380,6 +438,34 @@ ULONGLONG NToH64(ULONGLONG value)
 ULONGLONG HToN64(ULONGLONG value)
 {
 	return (((ULONGLONG)htonl((UINT)((value << 32) >> 32))) << 32) | htonl((UINT)(value >> 32));
+}
+
+BOOL IsLittleEndian()
+{
+	static const USHORT _s_endian_test_value = 0x0102;
+	static const BOOL _s_bLE = (*((BYTE*)&_s_endian_test_value) == 0x02);
+
+	return _s_bLE;
+}
+
+USHORT HToLE16(USHORT value)
+{
+	return IsLittleEndian() ? value : ENDIAN_SWAP_16(value);
+}
+
+USHORT HToBE16(USHORT value)
+{
+	return IsLittleEndian() ? ENDIAN_SWAP_16(value) : value;
+}
+
+DWORD HToLE32(DWORD value)
+{
+	return IsLittleEndian() ? value : ENDIAN_SWAP_32(value);
+}
+
+DWORD HToBE32(DWORD value)
+{
+	return IsLittleEndian() ? ENDIAN_SWAP_32(value) : value;
 }
 
 HRESULT ReadSmallFile(LPCTSTR lpszFileName, CFile& file, CFileMapping& fmap, DWORD dwMaxFileSize)
@@ -484,7 +570,7 @@ int SSO_KeepAliveVals(SOCKET sock, BOOL bOnOff, DWORD dwIdle, DWORD dwInterval, 
 
 		if(dwIdle == 0 || dwInterval == 0 || dwCount == 0)
 		{
-			::WSASetLastError(EINVAL);
+			::WSASetLastError(ERROR_INVALID_PARAMETER);
 			return SOCKET_ERROR;
 		}
 	}
@@ -501,10 +587,46 @@ int SSO_KeepAliveVals(SOCKET sock, BOOL bOnOff, DWORD dwIdle, DWORD dwInterval, 
 	return isOK ? NO_ERROR : SOCKET_ERROR;
 }
 
-int SSO_ReuseAddress(SOCKET sock, BOOL bReuse)
+int SSO_ReuseAddress(SOCKET sock, EnReuseAddressPolicy opt)
 {
-	int val = bReuse ? 1 : 0;
-	return setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &val, sizeof(int));
+	int iSet	= 1;
+	int iUnSet	= 0;
+	int rs		= NO_ERROR;
+
+	BOOL bReusePortSupported =
+#if defined(__linux) || defined(__linux__)
+		::IsKernelVersionAbove(3, 9, 0);
+#elif defined(__FreeBSD__) || defined(__NetBSD__) || defined(__OpenBSD__) || defined(__bsdi__) || defined(__APPLE__) || defined(__MACH__)
+		TRUE;
+#else
+		FALSE;
+#endif
+
+	if(opt == RAP_NONE)
+	{
+		rs  = setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &iUnSet, sizeof(int));
+		if(bReusePortSupported)
+		rs |= setsockopt(sock, SOL_SOCKET, SO_REUSEPORT, &iUnSet, sizeof(int));
+	}
+	else if(opt == RAP_ADDR_ONLY)
+	{
+		rs  = setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &iSet, sizeof(int));
+		if(bReusePortSupported)
+		rs |= setsockopt(sock, SOL_SOCKET, SO_REUSEPORT, &iUnSet, sizeof(int));
+	}
+	else if(opt == RAP_ADDR_AND_PORT)
+	{
+		rs  = setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &iSet, sizeof(int));
+		if(bReusePortSupported)
+		rs |= setsockopt(sock, SOL_SOCKET, SO_REUSEPORT, &iSet, sizeof(int));
+	}
+	else
+	{
+		::SetLastError(ERROR_INVALID_PARAMETER);
+		rs = -1;
+	}
+
+	return rs;
 }
 
 int SSO_RecvBuffSize(SOCKET sock, int size)
@@ -517,15 +639,19 @@ int SSO_SendBuffSize(SOCKET sock, int size)
 	return setsockopt(sock, SOL_SOCKET, SO_SNDBUF, &size, sizeof(int));
 }
 
-int SSO_RecvTimeout(SOCKET sock, int sec, int microsec)
+int SSO_RecvTimeOut(SOCKET sock, int ms)
 {
-	timeval tv = {sec, microsec};
+	timeval tv;
+	::MillisecondToTimeval(ms, tv);
+	
 	return setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(timeval));
 }
 
-int SSO_SendTimeout(SOCKET sock, int sec, int microsec)
+int SSO_SendTimeOut(SOCKET sock, int ms)
 {
-	timeval tv = {sec, microsec};
+	timeval tv;
+	::MillisecondToTimeval(ms, tv);
+
 	return setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(timeval));
 }
 
@@ -554,16 +680,489 @@ CONNID GenerateConnectionID()
 	return dwConnID;
 }
 
-int ManualCloseSocket(SOCKET sock, int iShutdownFlag, BOOL bGraceful, BOOL bReuseAddress)
+int IsUdpCloseNotify(const BYTE* pData, int iLength)
+{
+	return (iLength == s_iUdpCloseNotifySize								&&
+			memcmp(pData, s_szUdpCloseNotify, s_iUdpCloseNotifySize) == 0)	;
+}
+
+int SendUdpCloseNotify(SOCKET sock)
+{
+	return (int)send(sock, (LPCSTR)s_szUdpCloseNotify, s_iUdpCloseNotifySize, 0);
+}
+
+int SendUdpCloseNotify(SOCKET sock, const HP_SOCKADDR& remoteAddr)
+{
+	return (int)sendto(sock, (LPCSTR)s_szUdpCloseNotify, s_iUdpCloseNotifySize, 0, remoteAddr.Addr(), remoteAddr.AddrSize());
+}
+
+int ManualCloseSocket(SOCKET sock, int iShutdownFlag, BOOL bGraceful)
 {
 	if(!bGraceful)
 		SSO_Linger(sock, 1, 0);
-
-	if(bReuseAddress)
-		SSO_ReuseAddress(sock, bReuseAddress);
 
 	if(iShutdownFlag != 0xFF)
 		shutdown(sock, iShutdownFlag);
 
 	return closesocket(sock);
+}
+
+#ifdef _ICONV_SUPPORT
+
+BOOL CharsetConvert(LPCSTR lpszFromCharset, LPCSTR lpszToCharset, LPCSTR lpszInBuf, int iInBufLen, LPSTR lpszOutBuf, int& iOutBufLen)
+{
+	ASSERT(lpszInBuf != nullptr);
+
+	SIZE_T nInBufLeft	= iInBufLen;
+	SIZE_T nOutBufLeft	= iOutBufLen;
+	int iOutBufSize		= iOutBufLen;
+	iOutBufLen			= 0;
+
+	if(lpszInBuf == nullptr)
+	{
+		SetLastError(ERROR_INVALID_PARAMETER);
+		return FALSE;
+	}
+
+	iconv_t ic = iconv_open(lpszToCharset, lpszFromCharset);
+
+	if(IS_INVALID_PVOID(ic))
+		return FALSE;
+
+	SIZE_T rs	= iconv(ic, (LPSTR*)&lpszInBuf, &nInBufLeft, &lpszOutBuf, &nOutBufLeft);
+	iOutBufLen	= iOutBufSize - (int)nOutBufLeft;
+
+	EXECUTE_RESTORE_ERROR(iconv_close(ic));
+
+	return !IS_HAS_ERROR(rs);
+}
+
+BOOL GbkToUnicode(const char szSrc[], WCHAR szDest[], int& iDestLength)
+{
+	int iInBufLen	= (szSrc != nullptr) ? (int)strlen(szSrc) + 1 : 0;
+	int iOutBufLen	= (int)(iDestLength * sizeof(wchar_t));
+
+	BOOL isOK	= CharsetConvert(CHARSET_GBK, CHARSET_UTF_32LE, szSrc, iInBufLen, (char*)szDest, iOutBufLen);
+	iDestLength	= (int)(iOutBufLen / sizeof(wchar_t));
+
+	return isOK;
+}
+
+BOOL UnicodeToGbk(const WCHAR szSrc[], char szDest[], int& iDestLength)
+{
+	int iInBufLen = (szSrc != nullptr) ? (int)((wcslen(szSrc) + 1) * sizeof(wchar_t)) : 0;
+
+	return CharsetConvert(CHARSET_UTF_32LE, CHARSET_GBK, (LPCSTR)szSrc, iInBufLen, szDest, iDestLength);
+}
+
+BOOL Utf8ToUnicode(const char szSrc[], WCHAR szDest[], int& iDestLength)
+{
+	int iInBufLen	= (szSrc != nullptr) ? (int)strlen(szSrc) + 1 : 0;
+	int iOutBufLen	= (int)(iDestLength * sizeof(wchar_t));
+
+	BOOL isOK	= CharsetConvert(CHARSET_UTF_8, CHARSET_UTF_32LE, szSrc, iInBufLen, (char*)szDest, iOutBufLen);
+	iDestLength	= (int)(iOutBufLen / sizeof(wchar_t));
+
+	return isOK;
+}
+
+BOOL UnicodeToUtf8(const WCHAR szSrc[], char szDest[], int& iDestLength)
+{
+	int iInBufLen = (szSrc != nullptr) ? (int)((wcslen(szSrc) + 1) * sizeof(wchar_t)) : 0;
+
+	return CharsetConvert(CHARSET_UTF_32LE, CHARSET_UTF_8, (LPCSTR)szSrc, iInBufLen, szDest, iDestLength);
+}
+
+BOOL GbkToUtf8(const char szSrc[], char szDest[], int& iDestLength)
+{
+	int iInBufLen = (szSrc != nullptr) ? (int)strlen(szSrc) + 1 : 0;
+
+	return CharsetConvert(CHARSET_GBK, CHARSET_UTF_8, szSrc, iInBufLen, szDest, iDestLength);
+}
+
+BOOL Utf8ToGbk(const char szSrc[], char szDest[], int& iDestLength)
+{
+	int iInBufLen = (szSrc != nullptr) ? (int)strlen(szSrc) + 1 : 0;
+
+	return CharsetConvert(CHARSET_UTF_8, CHARSET_GBK, szSrc, iInBufLen, szDest, iDestLength);
+}
+
+#endif
+
+#ifdef _ZLIB_SUPPORT
+
+int Compress(const BYTE* lpszSrc, DWORD dwSrcLen, BYTE* lpszDest, DWORD& dwDestLen)
+{
+	return CompressEx(lpszSrc, dwSrcLen, lpszDest, dwDestLen);
+}
+
+int CompressEx(const BYTE* lpszSrc, DWORD dwSrcLen, BYTE* lpszDest, DWORD& dwDestLen, int iLevel, int iMethod, int iWindowBits, int iMemLevel, int iStrategy)
+{
+	z_stream stream;
+
+	stream.next_in	 = (z_const Bytef*)lpszSrc;
+	stream.avail_in	 = dwSrcLen;
+	stream.next_out	 = lpszDest;
+	stream.avail_out = dwDestLen;
+	stream.zalloc	 = nullptr;
+	stream.zfree	 = nullptr;
+	stream.opaque	 = nullptr;
+
+	int err = ::deflateInit2(&stream, iLevel, iMethod, iWindowBits, iMemLevel, iStrategy);
+
+	if(err != Z_OK) return err;
+
+	err = ::deflate(&stream, Z_FINISH);
+
+	if(err != Z_STREAM_END)
+	{
+		::deflateEnd(&stream);
+		return err == Z_OK ? Z_BUF_ERROR : err;
+	}
+
+	if(dwDestLen > stream.total_out)
+	{
+		lpszDest[stream.total_out]	= 0;
+		dwDestLen					= (DWORD)stream.total_out;
+	}
+
+	return ::deflateEnd(&stream);
+}
+
+int Uncompress(const BYTE* lpszSrc, DWORD dwSrcLen, BYTE* lpszDest, DWORD& dwDestLen)
+{
+	return UncompressEx(lpszSrc, dwSrcLen, lpszDest, dwDestLen);
+}
+
+int UncompressEx(const BYTE* lpszSrc, DWORD dwSrcLen, BYTE* lpszDest, DWORD& dwDestLen, int iWindowBits)
+{
+	z_stream stream;
+
+	stream.next_in	 = (z_const Bytef*)lpszSrc;
+	stream.avail_in	 = (uInt)dwSrcLen;
+	stream.next_out	 = lpszDest;
+	stream.avail_out = dwDestLen;
+	stream.zalloc	 = nullptr;
+	stream.zfree	 = nullptr;
+
+	int err = ::inflateInit2(&stream, iWindowBits);
+
+	if(err != Z_OK) return err;
+
+	err = ::inflate(&stream, Z_FINISH);
+
+	if(err != Z_STREAM_END)
+	{
+		::inflateEnd(&stream);
+		return (err == Z_NEED_DICT || (err == Z_BUF_ERROR && stream.avail_in == 0)) ? Z_DATA_ERROR : err;
+	}
+
+	if(dwDestLen > stream.total_out)
+	{
+		lpszDest[stream.total_out]	= 0;
+		dwDestLen					= (DWORD)stream.total_out;
+	}
+
+	return inflateEnd(&stream);
+}
+
+DWORD GuessCompressBound(DWORD dwSrcLen, BOOL bGZip)
+{
+	DWORD dwBound = (DWORD)::compressBound(dwSrcLen);
+	
+	if(bGZip) dwBound += 11;
+
+	return dwBound;
+}
+
+int GZipCompress(const BYTE* lpszSrc, DWORD dwSrcLen, BYTE* lpszDest, DWORD& dwDestLen)
+{
+	return CompressEx(lpszSrc, dwSrcLen, lpszDest, dwDestLen, Z_DEFAULT_COMPRESSION, Z_DEFLATED, MAX_WBITS + 16);
+}
+
+int GZipUncompress(const BYTE* lpszSrc, DWORD dwSrcLen, BYTE* lpszDest, DWORD& dwDestLen)
+{
+	return UncompressEx(lpszSrc, dwSrcLen, lpszDest, dwDestLen, MAX_WBITS + 32);
+}
+
+DWORD GZipGuessUncompressBound(const BYTE* lpszSrc, DWORD dwSrcLen)
+{
+	if(dwSrcLen < 20 || *(USHORT*)lpszSrc != 0x8B1F)
+		return 0;
+
+	return *(DWORD*)(lpszSrc + dwSrcLen - 4);
+}
+
+#endif
+
+
+DWORD GuessBase64EncodeBound(DWORD dwSrcLen)
+{
+	return 4 * ((dwSrcLen + 2) / 3);
+}
+
+DWORD GuessBase64DecodeBound(const BYTE* lpszSrc, DWORD dwSrcLen)
+{
+	if(dwSrcLen < 2)
+		return 0;
+
+	if(lpszSrc[dwSrcLen - 2] == '=')
+		dwSrcLen -= 2;
+	else if(lpszSrc[dwSrcLen - 1] == '=')
+			--dwSrcLen;
+
+	DWORD dwMod = dwSrcLen % 4;
+	DWORD dwAdd = dwMod == 2 ? 1 : (dwMod == 3 ? 2 : 0);
+
+	return 3 * (dwSrcLen / 4) + dwAdd;
+}
+
+int Base64Encode(const BYTE* lpszSrc, DWORD dwSrcLen, BYTE* lpszDest, DWORD& dwDestLen)
+{
+	static const BYTE CODES[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+	DWORD dwRealLen = GuessBase64EncodeBound(dwSrcLen);
+
+	if(lpszDest == nullptr || dwDestLen < dwRealLen)
+	{
+		dwDestLen = dwRealLen;
+		return -5;
+	}
+
+	BYTE* p		= lpszDest;
+	DWORD leven	= 3 * (dwSrcLen / 3);
+	DWORD i		= 0;
+
+	for (; i < leven; i += 3)
+	{
+		*p++ = CODES[lpszSrc[0] >> 2];
+		*p++ = CODES[((lpszSrc[0] & 3) << 4) + (lpszSrc[1] >> 4)];
+		*p++ = CODES[((lpszSrc[1] & 0xf) << 2) + (lpszSrc[2] >> 6)];
+		*p++ = CODES[lpszSrc[2] & 0x3f];
+
+		lpszSrc += 3;
+	}
+
+	if(i < dwSrcLen)
+	{
+		BYTE a = lpszSrc[0];
+		BYTE b = (i + 1 < dwSrcLen) ? lpszSrc[1] : 0;
+
+		*p++ = CODES[a >> 2];
+		*p++ = CODES[((a & 3) << 4) + (b >> 4)];
+		*p++ = (i + 1 < dwSrcLen) ? CODES[((b & 0xf) << 2)] : '=';
+		*p++ = '=';
+	}  
+
+	ASSERT(dwRealLen == (DWORD)(p - lpszDest));
+
+	if(dwDestLen > dwRealLen)
+	{
+		*p			= 0;
+		dwDestLen	= dwRealLen;
+	}
+
+	return 0;  
+}
+
+int Base64Decode(const BYTE* lpszSrc, DWORD dwSrcLen, BYTE* lpszDest, DWORD& dwDestLen)
+{
+	static const BYTE MAP[256]	=
+	{ 
+		255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 253, 255,
+		255, 253, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+		255, 255, 255, 255, 255, 255, 255, 255, 253, 255, 255, 255,
+		255, 255, 255, 255, 255, 255, 255,  62, 255, 255, 255,  63,
+		 52,  53,  54,  55,  56,  57,  58,  59,  60,  61, 255, 255,
+		255, 254, 255, 255, 255,   0,   1,   2,   3,   4,   5,   6,
+		  7,   8,   9,  10,  11,  12,  13,  14,  15,  16,  17,  18,
+		 19,  20,  21,  22,  23,  24,  25, 255, 255, 255, 255, 255,
+		255,  26,  27,  28,  29,  30,  31,  32,  33,  34,  35,  36,
+		 37,  38,  39,  40,  41,  42,  43,  44,  45,  46,  47,  48,
+		 49,  50,  51, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+		255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+		255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+		255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+		255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+		255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+		255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+		255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+		255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+		255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+		255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+		255, 255, 255, 255
+	};
+
+	DWORD dwRealLen = GuessBase64DecodeBound(lpszSrc, dwSrcLen);
+
+	if(lpszDest == nullptr || dwDestLen < dwRealLen)
+	{
+		dwDestLen = dwRealLen;
+		return -5;
+	}
+
+	BYTE c;
+	int g = 3;
+	DWORD i, x, y, z;
+
+	for(i = x = y = z = 0; i < dwSrcLen || x != 0;)
+	{
+		c = i < dwSrcLen ? MAP[lpszSrc[i++]] : 254;
+
+		if(c == 255) {dwDestLen = 0; return -3;}
+		else if(c == 254) {c = 0; g--;}
+		else if(c == 253) continue;
+
+		z = (z << 6) | c;
+
+		if(++x == 4)
+		{
+			lpszDest[y++] = (BYTE)((z >> 16) & 255);
+			if (g > 1) lpszDest[y++] = (BYTE)((z >> 8) & 255);
+			if (g > 2) lpszDest[y++] = (BYTE)(z & 255);
+
+			x = z = 0;
+		}
+	}
+
+	BOOL isOK = (y == dwRealLen);
+
+	if(!isOK)
+		dwDestLen = 0;
+	else
+	{
+		if(dwDestLen > dwRealLen)
+		{
+			lpszDest[dwRealLen]	= 0;
+			dwDestLen			= dwRealLen;
+		}
+	}
+
+	return isOK ? 0 : -3;
+}
+
+DWORD GuessUrlEncodeBound(const BYTE* lpszSrc, DWORD dwSrcLen)
+{
+	DWORD dwAdd = 0;
+
+	for(DWORD i = 0; i < dwSrcLen; i++)
+	{
+		BYTE c	= lpszSrc[i];
+
+		if(!(isalnum(c) || c == ' ' || c == '.' || c == '-' || c == '_' || c == '*'))
+			dwAdd += 2;
+	}
+
+	return dwSrcLen + dwAdd;
+}
+
+DWORD GuessUrlDecodeBound(const BYTE* lpszSrc, DWORD dwSrcLen)
+{
+	DWORD dwPercent = 0;
+
+	for(DWORD i = 0; i < dwSrcLen; i++)
+	{
+		if(lpszSrc[i] == '%')
+		{
+			++dwPercent;
+			i += 2;
+		}
+	}
+
+	DWORD dwSub = dwPercent * 2;
+
+	if(dwSrcLen < dwSub)
+		return 0;
+
+	return dwSrcLen - dwSub;
+}
+
+int UrlEncode(BYTE* lpszSrc, DWORD dwSrcLen, BYTE* lpszDest, DWORD& dwDestLen)
+{
+	BYTE c;
+	DWORD j = 0;
+
+	if(lpszDest == nullptr || dwDestLen == 0)
+		goto ERROR_DEST_LEN;
+
+	for(DWORD i = 0; i < dwSrcLen; i++)
+	{
+		if(j >= dwDestLen)
+			goto ERROR_DEST_LEN;
+
+		c = lpszSrc[i];
+
+		if (isalnum(c) || c == '.' || c == '-' || c == '_' || c == '*')
+			lpszDest[j++] = c;
+		else if(c == ' ')
+			lpszDest[j++] = '+';
+		else
+		{
+			if(j + 3 >= dwDestLen)
+				goto ERROR_DEST_LEN;
+
+			lpszDest[j++] = '%';
+			HEX_VALUE_TO_DOUBLE_CHAR(lpszDest + j, c);
+			j += 2;
+			
+		}
+	}
+
+	if(dwDestLen > j)
+	{
+		lpszDest[j]	= 0;
+		dwDestLen	= j;
+	}
+
+	return 0;
+
+ERROR_DEST_LEN:
+	dwDestLen = GuessUrlEncodeBound(lpszSrc, dwSrcLen);
+	return -5;
+}
+
+int UrlDecode(BYTE* lpszSrc, DWORD dwSrcLen, BYTE* lpszDest, DWORD& dwDestLen)
+{
+	char c;
+	DWORD j = 0;
+
+	if(lpszDest == nullptr || dwDestLen == 0)
+		goto ERROR_DEST_LEN;
+
+	for(DWORD i = 0; i < dwSrcLen; i++)
+	{
+		if(j >= dwDestLen)
+			goto ERROR_DEST_LEN;
+
+		c = lpszSrc[i];
+
+		if(c == '+')
+			lpszDest[j++] = ' ';
+		else if(c != '%')
+			lpszDest[j++] = c;
+		else
+		{
+			if(i + 2 >= dwSrcLen)
+				goto ERROR_SRC_DATA;
+
+			lpszDest[j++] = HEX_DOUBLE_CHAR_TO_VALUE(lpszSrc + i + 1);
+			i += 2;
+		}
+	}
+
+	if(dwDestLen > j)
+	{
+		lpszDest[j]	= 0;
+		dwDestLen	= j;
+	}
+
+	return 0;
+
+ERROR_SRC_DATA:
+	dwDestLen = 0;
+	return -3;
+
+ERROR_DEST_LEN:
+	dwDestLen = GuessUrlDecodeBound(lpszSrc, dwSrcLen);
+	return -5;
 }

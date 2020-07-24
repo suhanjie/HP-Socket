@@ -2,11 +2,11 @@
  * Copyright: JessMA Open Source (ldcsaa@gmail.com)
  *
  * Author	: Bruce Liang
- * Website	: http://www.jessma.org
- * Project	: https://github.com/ldcsaa
+ * Website	: https://github.com/ldcsaa
+ * Project	: https://github.com/ldcsaa/HP-Socket/HP-Socket
  * Blog		: http://www.cnblogs.com/ldcsaa
  * Wiki		: http://www.oschina.net/p/hp-socket
- * QQ Group	: 75375912, 44636872
+ * QQ Group	: 44636872, 75375912
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,13 +23,14 @@
  
 #pragma once
 
-#include "SocketHelper.h"
-#include "HttpCookie.h"
+#include "HPTypeDef.h"
 
 #ifdef _HTTP_SUPPORT
 
+#include "SocketHelper.h"
+#include "HttpCookie.h"
+
 #include "../Common/Src/http/http_parser.h"
-#include "../Common/Src/zlib/zutil.h"
 
 /************************************************************************
 名称：HTTP 全局常量
@@ -235,6 +236,14 @@ public:
 					}
 					else
 					{
+						if((m_pHttpObj->IsRequest() && iMaskLen == 0) || (!m_pHttpObj->IsRequest() && iMaskLen > 0))
+						{
+							::SetLastError(ERROR_INVALID_DATA);
+							hr = HR_ERROR;
+
+							break;
+						} 
+
 						m_ullBodyLen	= iExtLen == 0 ? iLen : (iExtLen == 2 ? bh.extlen() : NToH64(*(ULONGLONG*)(m_szHeader + HTTP_MIN_WS_HEADER_LEN)));
 						m_ullBodyRemain	= m_ullBodyLen;
 						m_lpszMask		= iMaskLen > 0 ? m_szHeader + HTTP_MIN_WS_HEADER_LEN + iExtLen : nullptr;
@@ -270,7 +279,7 @@ public:
 
 				m_ullBodyRemain	-= iMin;
 
-				EnHandleResult hr = m_pHttpObj->on_ws_message_body(pTemp, iMin);
+				hr = m_pHttpObj->on_ws_message_body(pTemp, iMin);
 
 				if(hr == HR_ERROR)
 					break;
@@ -288,7 +297,7 @@ public:
 			iRemain	-= iMin;
 		}
 
-		return HR_OK;
+		return hr;
 	}
 
 	BOOL GetMessageState(BOOL* lpbFinal, BYTE* lpiReserved, BYTE* lpiOperationCode, LPCBYTE* lpszMask, ULONGLONG* lpullBodyLen, ULONGLONG* lpullBodyRemain)
@@ -476,7 +485,7 @@ public:
 		pSelf->m_headers.emplace(move(THeaderMap::value_type(pSelf->m_strCurHeader, pSelf->GetBuffer())));
 		hpr = pSelf->m_pContext->FireHeader(pSelf->m_pSocket, pSelf->m_strCurHeader, pSelf->GetBuffer());
 
-		if(hpr != HPR_ERROR)
+		if(hpr != HPR_ERROR && !pSelf->GetBufferRef().Trim().IsEmpty())
 		{
 			if(pSelf->m_bRequest && pSelf->m_strCurHeader == HTTP_HEADER_COOKIE)
 				hpr = pSelf->ParseCookie();
@@ -678,6 +687,7 @@ public:
 	DWORD GetFreeTime() const		{return m_dwFreeTime;}
 	void SetFree()					{m_dwFreeTime = ::TimeGetTime();}
 
+	BOOL IsRequest()				{return m_bRequest;}
 	BOOL IsUpgrade()				{return m_parser.upgrade;}
 	BOOL IsKeepAlive()				{return ::http_should_keep_alive(&m_parser);}
 	USHORT GetVersion()				{return MAKEWORD(m_parser.http_major, m_parser.http_minor);}
@@ -990,6 +1000,7 @@ public:
 	: m_pContext		(pContext)
 	, m_pSocket			(pSocket)
 	, m_bRequest		(bRequest)
+	, m_bValid			(FALSE)
 	, m_bReleased		(FALSE)
 	, m_dwFreeTime		(0)
 	, m_usUrlFieldSet	(m_bRequest ? 0 : -1)
@@ -1021,12 +1032,13 @@ public:
 	static void Destruct(THttpObjT* pHttpObj)
 		{if(pHttpObj) delete pHttpObj;}
 
-	void Reset()
+	void Reset(BOOL bValid = FALSE)
 	{
 		ResetParser();
 		ResetHeaderState();
 		ReleaseWSContext();
 
+		m_bValid	 = bValid;
 		m_bReleased  = FALSE;
 		m_enUpgrade  = HUT_NONE;
 		m_dwFreeTime = 0;
@@ -1034,10 +1046,20 @@ public:
 
 	void Renew(T* pContext, S* pSocket)
 	{
+		Reset(TRUE);
+
 		m_pContext	= pContext;
 		m_pSocket	= pSocket;
+	}
 
-		Reset();
+	void SetValid(BOOL bValid = TRUE)
+	{
+		m_bValid = bValid;
+	}
+
+	BOOL IsValid()
+	{
+		return m_bValid;
 	}
 
 	BOOL CopyData(const THttpObjT& src)
@@ -1151,12 +1173,14 @@ private:
 	void AppendBuffer(const char* at, size_t length)	{m_strBuffer.Append(at, (int)length);}
 	void ResetBuffer()									{m_strBuffer.Empty();}
 	LPCSTR GetBuffer()									{return m_strBuffer;}
+	CStringA& GetBufferRef()							{return m_strBuffer;}
 
 	static THttpObjT* Self(http_parser* p)				{return (THttpObjT*)(p->data);}
 	static T* SelfContext(http_parser* p)				{return Self(p)->m_pContext;}
 	static S* SelfSocketObj(http_parser* p)				{return Self(p)->m_pSocket;}
 
 private:
+	BOOL		m_bValid;
 	BOOL		m_bRequest;
 	BOOL		m_bReleased;
 	T*			m_pContext;
@@ -1218,10 +1242,10 @@ public:
 		if(m_lsFreeHttpObj.TryLock(&pHttpObj, dwIndex))
 		{
 			if(::GetTimeGap32(pHttpObj->GetFreeTime()) >= m_dwHttpObjLockTime)
-				VERIFY(m_lsFreeHttpObj.ReleaseLock(nullptr, dwIndex));
+				ENSURE(m_lsFreeHttpObj.ReleaseLock(nullptr, dwIndex));
 			else
 			{
-				VERIFY(m_lsFreeHttpObj.ReleaseLock(pHttpObj, dwIndex));
+				ENSURE(m_lsFreeHttpObj.ReleaseLock(pHttpObj, dwIndex));
 				pHttpObj = nullptr;
 			}
 		}
@@ -1241,50 +1265,29 @@ public:
 	{
 		pHttpObj->SetFree();
 
+		ReleaseGCHttpObj();
+		
 		if(!m_lsFreeHttpObj.TryPut(pHttpObj))
-		{
 			m_lsGCHttpObj.PushBack(pHttpObj);
-
-			if(m_lsGCHttpObj.Size() > m_dwHttpObjPoolSize)
-				ReleaseGCHttpObj();
-		}
 	}
 
 	void Prepare()
 	{
-		m_lsFreeHttpObj.Reset(m_dwHttpObjPoolHold);
+		m_lsFreeHttpObj.Reset(m_dwHttpObjPoolSize);
 	}
 
 	void Clear()
 	{
-		THttpObj* pHttpObj = nullptr;
-
-		while(m_lsFreeHttpObj.TryGet(&pHttpObj))
-			delete pHttpObj;
-
-		VERIFY(m_lsFreeHttpObj.IsEmpty());
-		m_lsFreeHttpObj.Reset();
+		m_lsFreeHttpObj.Clear();
 
 		ReleaseGCHttpObj(TRUE);
-		VERIFY(m_lsGCHttpObj.IsEmpty());
+		ENSURE(m_lsGCHttpObj.IsEmpty());
 	}
 
 private:
 	void ReleaseGCHttpObj(BOOL bForce = FALSE)
 	{
-		THttpObj* pHttpObj	= nullptr;
-		DWORD now			= ::TimeGetTime();
-
-		while(m_lsGCHttpObj.PopFront(&pHttpObj))
-		{
-			if(bForce || (int)(now - pHttpObj->GetFreeTime()) >= (int)m_dwHttpObjLockTime)
-				delete pHttpObj;
-			else
-			{
-				m_lsGCHttpObj.PushBack(pHttpObj);
-				break;
-			}
-		}
+		::ReleaseGCObj(m_lsGCHttpObj, m_dwHttpObjLockTime, bForce);
 	}
 
 public:
@@ -1325,9 +1328,9 @@ private:
 	TSSLHttpObjQueue	m_lsGCHttpObj;
 };
 
-template<BOOL is_request, class T, class S> const DWORD CHttpObjPoolT<is_request, T, S>::DEFAULT_HTTPOBJ_LOCK_TIME	= 10 * 1000;
-template<BOOL is_request, class T, class S> const DWORD CHttpObjPoolT<is_request, T, S>::DEFAULT_HTTPOBJ_POOL_SIZE	= 150;
-template<BOOL is_request, class T, class S> const DWORD CHttpObjPoolT<is_request, T, S>::DEFAULT_HTTPOBJ_POOL_HOLD	= 600;
+template<BOOL is_request, class T, class S> const DWORD CHttpObjPoolT<is_request, T, S>::DEFAULT_HTTPOBJ_LOCK_TIME	= DEFAULT_OBJECT_CACHE_LOCK_TIME;
+template<BOOL is_request, class T, class S> const DWORD CHttpObjPoolT<is_request, T, S>::DEFAULT_HTTPOBJ_POOL_SIZE	= DEFAULT_OBJECT_CACHE_POOL_SIZE;
+template<BOOL is_request, class T, class S> const DWORD CHttpObjPoolT<is_request, T, S>::DEFAULT_HTTPOBJ_POOL_HOLD	= DEFAULT_OBJECT_CACHE_POOL_HOLD;
 
 // ------------------------------------------------------------------------------------------------------------- //
 
@@ -1338,25 +1341,8 @@ extern void MakeRequestLine(LPCSTR lpszMethod, LPCSTR lpszPath, EnHttpVersion en
 extern void MakeStatusLine(EnHttpVersion enVersion, USHORT usStatusCode, LPCSTR lpszDesc, CStringA& strValue);
 extern void MakeHeaderLines(const THeader lpHeaders[], int iHeaderCount, const TCookieMap* pCookies, int iBodyLength, BOOL bRequest, int iConnFlag, LPCSTR lpszDefaultHost, USHORT usPort, CStringA& strValue);
 extern void MakeHttpPacket(const CStringA& strHeader, const BYTE* pBody, int iLength, WSABUF szBuffer[2]);
+extern int MakeChunkPackage(const BYTE* pData, int iLength, LPCSTR lpszExtensions, char szLen[12], WSABUF bufs[5]);
 extern BOOL MakeWSPacket(BOOL bFinal, BYTE iReserved, BYTE iOperationCode, const BYTE lpszMask[4], BYTE* pData, int iLength, ULONGLONG ullBodyLen, BYTE szHeader[HTTP_MAX_WS_HEADER_LEN], WSABUF szBuffer[2]);
 extern BOOL ParseUrl(const CStringA& strUrl, BOOL& bHttps, CStringA& strHost, USHORT& usPort, CStringA& strPath);
-
-// 普通压缩（返回值：0 -> 成功，-3 -> 输入数据不正确，-5 -> 输出缓冲区不足）
-int Compress(const BYTE* lpszSrc, DWORD dwSrcLen, BYTE* lpszDest, DWORD& dwDestLen);
-// 高级压缩（返回值：0 -> 成功，-3 -> 输入数据不正确，-5 -> 输出缓冲区不足）
-int CompressEx(const BYTE* lpszSrc, DWORD dwSrcLen, BYTE* lpszDest, DWORD& dwDestLen, int iLevel = Z_DEFAULT_COMPRESSION, int iMethod = Z_DEFLATED, int iWindowBits = DEF_WBITS, int iMemLevel = DEF_MEM_LEVEL, int iStrategy = Z_DEFAULT_STRATEGY);
-// 普通解压（返回值：0 -> 成功，-3 -> 输入数据不正确，-5 -> 输出缓冲区不足）
-int Uncompress(const BYTE* lpszSrc, DWORD dwSrcLen, BYTE* lpszDest, DWORD& dwDestLen);
-// 高级解压（返回值：0 -> 成功，-3 -> 输入数据不正确，-5 -> 输出缓冲区不足）
-int UncompressEx(const BYTE* lpszSrc, DWORD dwSrcLen, BYTE* lpszDest, DWORD& dwDestLen, int iWindowBits = DEF_WBITS);
-// 推测压缩结果长度
-DWORD GuessCompressBound(DWORD dwSrcLen, BOOL bGZip = FALSE);
-
-// Gzip 压缩（返回值：0 -> 成功，-3 -> 输入数据不正确，-5 -> 输出缓冲区不足）
-int GZipCompress(const BYTE* lpszSrc, DWORD dwSrcLen, BYTE* lpszDest, DWORD& dwDestLen);
-// Gzip 解压（返回值：0 -> 成功，-3 -> 输入数据不正确，-5 -> 输出缓冲区不足）
-int GZipUncompress(const BYTE* lpszSrc, DWORD dwSrcLen, BYTE* lpszDest, DWORD& dwDestLen);
-// 推测 Gzip 解压结果长度（如果返回 0 或不合理值则说明输入内容并非有效的 Gzip 格式）
-DWORD GZipGuessUncompressBound(const BYTE* lpszSrc, DWORD dwSrcLen);
 
 #endif

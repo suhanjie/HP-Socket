@@ -2,11 +2,11 @@
  * Copyright: JessMA Open Source (ldcsaa@gmail.com)
  *
  * Author	: Bruce Liang
- * Website	: http://www.jessma.org
- * Project	: https://github.com/ldcsaa
+ * Website	: https://github.com/ldcsaa
+ * Project	: https://github.com/ldcsaa/HP-Socket
  * Blog		: http://www.cnblogs.com/ldcsaa
  * Wiki		: http://www.oschina.net/p/hp-socket
- * QQ Group	: 75375912, 44636872
+ * QQ Group	: 44636872, 75375912
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -41,6 +41,7 @@ template<class T> class CTcpPullServerT : public IPullSocket, public T
 
 public:
 	using __super::Stop;
+	using __super::GetState;
 
 public:
 	virtual EnFetchResult Fetch(CONNID dwConnID, BYTE* pData, int iLength)
@@ -86,7 +87,6 @@ protected:
 
 		TBuffer* pBuffer = nullptr;
 		GetConnectionReserved(pSocketObj, (PVOID*)&pBuffer);
-		ASSERT(pBuffer);
 
 		if(pBuffer != nullptr)
 			m_bfPool.PutFreeBuffer(pBuffer);
@@ -127,7 +127,7 @@ public:
 
 	virtual ~CTcpPullServerT()
 	{
-		Stop();
+		ENSURE_STOP();
 	}
 
 private:

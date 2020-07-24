@@ -12,6 +12,7 @@
 #define _DETECT_MEMORY_LEAK
 
 #define _NEED_SSL
+#define _ZLIB_DISABLED
 
 #include "../../../Common/Src/GeneralHelper.h"
 

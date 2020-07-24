@@ -2,11 +2,11 @@
  * Copyright: JessMA Open Source (ldcsaa@gmail.com)
  *
  * Author	: Bruce Liang
- * Website	: http://www.jessma.org
- * Project	: https://github.com/ldcsaa
+ * Website	: https://github.com/ldcsaa
+ * Project	: https://github.com/ldcsaa/HP-Socket
  * Blog		: http://www.cnblogs.com/ldcsaa
  * Wiki		: http://www.oschina.net/p/hp-socket
- * QQ Group	: 75375912, 44636872
+ * QQ Group	: 44636872, 75375912
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -99,25 +99,46 @@ template<class T, USHORT default_port> BOOL CHttpAgentT<T, default_port>::SendLo
 	return SendRequest(dwConnID, lpszMethod, lpszPath, lpHeaders, iHeaderCount, (BYTE*)fmap, (int)fmap.Size());
 }
 
-template<class T, USHORT default_port> BOOL CHttpAgentT<T, default_port>::SendWSMessage(CONNID dwConnID, BOOL bFinal, BYTE iReserved, BYTE iOperationCode, const BYTE lpszMask[4], BYTE* pData, int iLength, ULONGLONG ullBodyLen)
+template<class T, USHORT default_port> BOOL CHttpAgentT<T, default_port>::SendChunkData(CONNID dwConnID, const BYTE* pData, int iLength, LPCSTR lpszExtensions)
 {
+	char szLen[12];
+	WSABUF bufs[5];
+
+	int iCount = MakeChunkPackage(pData, iLength, lpszExtensions, szLen, bufs);
+
+	return SendPackets(dwConnID, bufs, iCount);
+}
+
+template<class T, USHORT default_port> BOOL CHttpAgentT<T, default_port>::SendWSMessage(CONNID dwConnID, BOOL bFinal, BYTE iReserved, BYTE iOperationCode, const BYTE lpszMask[4], const BYTE* pData, int iLength, ULONGLONG ullBodyLen)
+{
+	ASSERT(lpszMask);
+
 	WSABUF szBuffer[2];
 	BYTE szHeader[HTTP_MAX_WS_HEADER_LEN];
 
-	if(!::MakeWSPacket(bFinal, iReserved, iOperationCode, lpszMask, pData, iLength, ullBodyLen, szHeader, szBuffer))
+	unique_ptr<BYTE[]> szData = make_unique<BYTE[]>(iLength);
+	memcpy(szData.get(), pData, iLength);
+
+	if(!::MakeWSPacket(bFinal, iReserved, iOperationCode, lpszMask, szData.get(), iLength, ullBodyLen, szHeader, szBuffer))
 		return FALSE;
 
 	return SendPackets(dwConnID, szBuffer, 2);
 }
 
+template<class T, USHORT default_port> EnHandleResult CHttpAgentT<T, default_port>::FireConnect(TAgentSocketObj* pSocketObj)
+{
+	return m_bHttpAutoStart ? __super::FireConnect(pSocketObj) : __super::DoFireConnect(pSocketObj);
+}
+
 template<class T, USHORT default_port> EnHandleResult CHttpAgentT<T, default_port>::DoFireConnect(TAgentSocketObj* pSocketObj)
 {
+	THttpObj* pHttpObj	  = DoStartHttp(pSocketObj);
 	EnHandleResult result = __super::DoFireConnect(pSocketObj);
 
-	if(result != HR_ERROR)
+	if(result == HR_ERROR)
 	{
-		THttpObj* pHttpObj = m_objPool.PickFreeHttpObj(this, pSocketObj);
-		VERIFY(SetConnectionReserved(pSocketObj, pHttpObj));
+		m_objPool.PutFreeHttpObj(pHttpObj);
+		SetConnectionReserved(pSocketObj, nullptr);
 	}
 
 	return result;
@@ -142,9 +163,11 @@ template<class T, USHORT default_port> EnHandleResult CHttpAgentT<T, default_por
 template<class T, USHORT default_port> EnHandleResult CHttpAgentT<T, default_port>::DoFireReceive(TAgentSocketObj* pSocketObj, const BYTE* pData, int iLength)
 {
 	THttpObj* pHttpObj = FindHttpObj(pSocketObj);
-	ASSERT(pHttpObj);
 
-	return pHttpObj->Execute(pData, iLength);
+	if(pHttpObj != nullptr)
+		return pHttpObj->Execute(pData, iLength);
+	else
+		return DoFireSuperReceive(pSocketObj, pData, iLength);
 }
 
 template<class T, USHORT default_port> EnHandleResult CHttpAgentT<T, default_port>::DoFireClose(TAgentSocketObj* pSocketObj, EnSocketOperation enOperation, int iErrorCode)
@@ -157,7 +180,10 @@ template<class T, USHORT default_port> EnHandleResult CHttpAgentT<T, default_por
 	EnHandleResult result = __super::DoFireClose(pSocketObj, enOperation, iErrorCode);
 
 	if(pHttpObj != nullptr)
+	{
 		m_objPool.PutFreeHttpObj(pHttpObj);
+		SetConnectionReserved(pSocketObj, nullptr);
+	}
 
 	return result;
 }
@@ -353,6 +379,78 @@ template<class T, USHORT default_port> inline typename CHttpAgentT<T, default_po
 {
 	THttpObj* pHttpObj = nullptr;
 	GetConnectionReserved(pSocketObj, (PVOID*)&pHttpObj);
+
+	return pHttpObj;
+}
+
+template<class T, USHORT default_port> BOOL CHttpAgentT<T, default_port>::StartHttp(CONNID dwConnID)
+{
+	if(IsHttpAutoStart())
+	{
+		::SetLastError(ERROR_INVALID_OPERATION);
+		return FALSE;
+	}
+
+	TAgentSocketObj* pSocketObj = FindSocketObj(dwConnID);
+
+	if(!TAgentSocketObj::IsValid(pSocketObj))
+	{
+		::SetLastError(ERROR_OBJECT_NOT_FOUND);
+		return FALSE;
+	}
+
+	return StartHttp(pSocketObj);
+}
+
+template<class T, USHORT default_port> BOOL CHttpAgentT<T, default_port>::StartHttp(TAgentSocketObj* pSocketObj)
+{
+	if(!pSocketObj->HasConnected())
+	{
+		::SetLastError(ERROR_INVALID_STATE);
+		return FALSE;
+	}
+
+	CReentrantCriSecLock locallock(pSocketObj->csSend);
+
+	if(!TAgentSocketObj::IsValid(pSocketObj))
+	{
+		::SetLastError(ERROR_OBJECT_NOT_FOUND);
+		return FALSE;
+	}
+
+	if(!pSocketObj->HasConnected())
+	{
+		::SetLastError(ERROR_INVALID_STATE);
+		return FALSE;
+	}
+
+	THttpObj* pHttpObj = FindHttpObj(pSocketObj);
+
+	if(pHttpObj != nullptr)
+	{
+		::SetLastError(ERROR_ALREADY_INITIALIZED);
+		return FALSE;
+	}
+
+	DoStartHttp(pSocketObj);
+
+	if(!IsSecure())
+		FireHandShake(pSocketObj);
+	else
+	{
+#ifdef _SSL_SUPPORT
+		if(IsSSLAutoHandShake())
+			StartSSLHandShake(pSocketObj);
+#endif
+	}
+
+	return TRUE;
+}
+
+template<class T, USHORT default_port> typename CHttpAgentT<T, default_port>::THttpObj* CHttpAgentT<T, default_port>::DoStartHttp(TAgentSocketObj* pSocketObj)
+{
+	THttpObj* pHttpObj = m_objPool.PickFreeHttpObj(this, pSocketObj);
+	VERIFY(SetConnectionReserved(pSocketObj, pHttpObj));
 
 	return pHttpObj;
 }

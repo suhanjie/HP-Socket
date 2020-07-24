@@ -36,6 +36,9 @@
     <ClCompile Include="..\..\..\src\common\crypto\Crypto.cpp">
       <Filter>Common\Crypto</Filter>
     </ClCompile>
+    <ClCompile Include="..\..\..\src\common\Thread.cpp">
+      <Filter>Common</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\..\..\src\common\FileHelper.h">
@@ -62,14 +65,14 @@
     <ClInclude Include="..\..\..\include\hpsocket\HPTypeDef.h">
       <Filter>HPSocket</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\..\include\HPSocket4C-SSL.h">
-      <Filter>HPSocket</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\..\include\HPSocket4C.h">
-      <Filter>HPSocket</Filter>
-    </ClInclude>
     <ClInclude Include="..\..\..\src\common\crypto\Crypto.h">
       <Filter>Common\Crypto</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\..\include\hpsocket\HPSocket4C-SSL.h">
+      <Filter>HPSocket</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\..\include\hpsocket\HPSocket4C.h">
+      <Filter>HPSocket</Filter>
     </ClInclude>
   </ItemGroup>
 </Project>

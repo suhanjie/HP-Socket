@@ -2,11 +2,11 @@
  * Copyright: JessMA Open Source (ldcsaa@gmail.com)
  *
  * Author	: Bruce Liang
- * Website	: http://www.jessma.org
- * Project	: https://github.com/ldcsaa
+ * Website	: https://github.com/ldcsaa
+ * Project	: https://github.com/ldcsaa/HP-Socket/HP-Socket
  * Blog		: http://www.cnblogs.com/ldcsaa
  * Wiki		: http://www.oschina.net/p/hp-socket
- * QQ Group	: 75375912, 44636872
+ * QQ Group	: 44636872, 75375912
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -27,6 +27,7 @@
 #ifdef _HTTP_SUPPORT
 
 #pragma warning(disable: 4503)
+#pragma warning(disable: 4840)
 
 static const char* s_short_week[]	= {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
 static const char* s_short_month[]	= {"Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
@@ -53,9 +54,6 @@ CCookie* CCookie::FromString(const CStringA& strCookie, LPCSTR lpszDefaultDomain
 		CStringA strField = strCookie.Tokenize(COOKIE_FIELD_SEP, iStart);
 		strField.Trim();
 
-		if(strField.IsEmpty())
-			break;
-
 		if(i == 0)
 		{
 			ParseFieldKV(strField, strName, strValue, COOKIE_KV_SEP_CHAR);
@@ -65,6 +63,9 @@ CCookie* CCookie::FromString(const CStringA& strCookie, LPCSTR lpszDefaultDomain
 		}
 		else
 		{
+			if(strField.IsEmpty())
+				break;
+
 			CStringA strKey;
 			CStringA strVal;
 
@@ -338,7 +339,7 @@ CStringA CCookie::MakeExpiresStr(__time64_t tmExpires)
 	if(tmExpires < 1) tmExpires = 1;
 
 	tm t;
-	VERIFY(_gmtime64_s(&t, &tmExpires) == 0);
+	ENSURE(_gmtime64_s(&t, &tmExpires) == 0);
 
 	CStringA str;
 	str.Format("%s, %02d-%s-%04d %02d:%02d:%02d GMT", 
@@ -770,12 +771,12 @@ BOOL CCookieMgr::SetCookieNoLock(const CCookie& cookie, BOOL bOnlyUpdateValueIfE
 	CCookieDomainMapI it = m_cookies.find(cookie.domain);
 
 	if(it == m_cookies.end())
-		it = m_cookies.emplace(move(CCookieDomainMap::value_type(cookie.domain, move(CCookiePathMap())))).first;
+		it = m_cookies.emplace(CCookieDomainMap::value_type(cookie.domain, CCookiePathMap())).first;
 
 	CCookiePathMapI it2 = it->second.find(cookie.path);
 
 	if(it2 == it->second.end())
-		it2 = it->second.emplace(move(CCookiePathMap::value_type(cookie.path, move(CCookieSet())))).first;
+		it2 = it->second.emplace(CCookiePathMap::value_type(cookie.path, CCookieSet())).first;
 
 	CCookieSet& cookies	= it2->second;
 	CCookieSetI it3		= cookies.find(cookie);

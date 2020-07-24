@@ -2,11 +2,11 @@
 * Copyright: JessMA Open Source (ldcsaa@gmail.com)
 *
 * Author	: Bruce Liang
-* Website	: http://www.jessma.org
-* Project	: https://github.com/ldcsaa
+* Website	: https://github.com/ldcsaa
+* Project	: https://github.com/ldcsaa/HP-Socket
 * Blog		: http://www.cnblogs.com/ldcsaa
 * Wiki		: http://www.oschina.net/p/hp-socket
-* QQ Group	: 75375912, 44636872
+* QQ Group	: 44636872, 75375912
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -88,7 +88,7 @@ public:
 
 		if(isOK)
 		{
-			isOK  = m_thHandler.Cancel();
+			isOK  = m_thHandler.Interrupt();
 			isOK &= m_thHandler.Join();
 		}
 
@@ -112,12 +112,26 @@ private:
 
 		SI si;
 
-		while(TRUE)
+		ZeroObject(si);
+
+		while(!::IsThreadInterrupted())
 		{
-			int rs = NO_EINTR_INT(sigwaitinfo(pSigSet, &si));
+#if !defined(__ANDROID__)
+			int rs = NO_EINTR_EXCEPT_THR_INTR_INT(sigwaitinfo(pSigSet, &si));
+#else
+			int rs = NO_EINTR_EXCEPT_THR_INTR_INT(sigwait(pSigSet, &si.si_signo));
+#endif
 
 			if(IS_HAS_ERROR(rs))
+			{
+				if(IS_ERROR(EINTR))
+				{
+					ASSERT(::IsThreadInterrupted());
+					break;
+				}
+				
 				ERROR_ABORT();
+			}
 
 			Run((T*)nullptr, &si);
 		}

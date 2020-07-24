@@ -2,11 +2,11 @@
  * Copyright: JessMA Open Source (ldcsaa@gmail.com)
  *
  * Author	: Bruce Liang
- * Website	: http://www.jessma.org
- * Project	: https://github.com/ldcsaa
+ * Website	: https://github.com/ldcsaa
+ * Project	: https://github.com/ldcsaa/HP-Socket
  * Blog		: http://www.cnblogs.com/ldcsaa
  * Wiki		: http://www.oschina.net/p/hp-socket
- * QQ Group	: 75375912, 44636872
+ * QQ Group	: 44636872, 75375912
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -26,14 +26,17 @@
 #include "SocketHelper.h"
 #include "./common/GeneralHelper.h"
 
+#ifdef _UDP_SUPPORT
+
 class CUdpCast : public IUdpCast
 {
 public:
-	virtual BOOL Start	(LPCTSTR lpszRemoteAddress, USHORT usPort, BOOL bAsyncConnect = TRUE, LPCTSTR lpszBindAddress = nullptr);
+	virtual BOOL Start	(LPCTSTR lpszRemoteAddress, USHORT usPort, BOOL bAsyncConnect = TRUE, LPCTSTR lpszBindAddress = nullptr, USHORT usLocalPort = 0);
 	virtual BOOL Stop	();
 	virtual BOOL Send	(const BYTE* pBuffer, int iLength, int iOffset = 0);
 	virtual BOOL SendPackets	(const WSABUF pBuffers[], int iCount);
 	virtual BOOL PauseReceive	(BOOL bPause = TRUE);
+	virtual BOOL Wait			(DWORD dwMilliseconds = INFINITE) {return m_evWait.WaitFor(dwMilliseconds, CStopWaitingPredicate<IClient>(this));}
 	virtual BOOL			HasStarted			()	{return m_enState == SS_STARTED || m_enState == SS_STARTING;}
 	virtual EnServiceState	GetState			()	{return m_enState;}
 	virtual CONNID			GetConnectionID		()	{return m_dwConnID;};
@@ -44,23 +47,24 @@ public:
 	virtual BOOL GetRemoteHost			(TCHAR lpszHost[], int& iHostLen, USHORT& usPort);
 	virtual BOOL GetPendingDataLength	(int& iPending) {iPending = m_lsSend.Length(); return HasStarted();}
 	virtual BOOL IsPauseReceive			(BOOL& bPaused) {bPaused = m_bPaused; return HasStarted();}
+	virtual BOOL IsConnected			()				{return m_bConnected;}
 
 public:
 	virtual BOOL IsSecure				() {return FALSE;}
 
-	virtual void SetMaxDatagramSize		(DWORD dwMaxDatagramSize)		{m_dwMaxDatagramSize	= dwMaxDatagramSize;}
-	virtual void SetFreeBufferPoolSize	(DWORD dwFreeBufferPoolSize)	{m_dwFreeBufferPoolSize	= dwFreeBufferPoolSize;}
-	virtual void SetFreeBufferPoolHold	(DWORD dwFreeBufferPoolHold)	{m_dwFreeBufferPoolHold	= dwFreeBufferPoolHold;}
-	virtual void SetReuseAddress		(BOOL bReuseAddress)			{m_bReuseAddress		= bReuseAddress;}
-	virtual void SetCastMode			(EnCastMode enCastMode)			{m_enCastMode			= enCastMode;}
-	virtual void SetMultiCastTtl		(int iMCTtl)					{m_iMCTtl				= iMCTtl;}
-	virtual void SetMultiCastLoop		(BOOL bMCLoop)					{m_bMCLoop				= bMCLoop;}
-	virtual void SetExtra				(PVOID pExtra)					{m_pExtra				= pExtra;}						
+	virtual void SetReuseAddressPolicy	(EnReuseAddressPolicy enReusePolicy){ENSURE_HAS_STOPPED(); m_enReusePolicy			= enReusePolicy;}
+	virtual void SetMaxDatagramSize		(DWORD dwMaxDatagramSize)			{ENSURE_HAS_STOPPED(); m_dwMaxDatagramSize		= dwMaxDatagramSize;}
+	virtual void SetFreeBufferPoolSize	(DWORD dwFreeBufferPoolSize)		{ENSURE_HAS_STOPPED(); m_dwFreeBufferPoolSize	= dwFreeBufferPoolSize;}
+	virtual void SetFreeBufferPoolHold	(DWORD dwFreeBufferPoolHold)		{ENSURE_HAS_STOPPED(); m_dwFreeBufferPoolHold	= dwFreeBufferPoolHold;}
+	virtual void SetCastMode			(EnCastMode enCastMode)				{ENSURE_HAS_STOPPED(); m_enCastMode				= enCastMode;}
+	virtual void SetMultiCastTtl		(int iMCTtl)						{ENSURE_HAS_STOPPED(); m_iMCTtl					= iMCTtl;}
+	virtual void SetMultiCastLoop		(BOOL bMCLoop)						{ENSURE_HAS_STOPPED(); m_bMCLoop				= bMCLoop;}
+	virtual void SetExtra				(PVOID pExtra)						{m_pExtra										= pExtra;}						
 
+	virtual EnReuseAddressPolicy GetReuseAddressPolicy	()	{return m_enReusePolicy;}
 	virtual DWORD GetMaxDatagramSize	()	{return m_dwMaxDatagramSize;}
 	virtual DWORD GetFreeBufferPoolSize	()	{return m_dwFreeBufferPoolSize;}
 	virtual DWORD GetFreeBufferPoolHold	()	{return m_dwFreeBufferPoolHold;}
-	virtual BOOL  IsReuseAddress		()	{return m_bReuseAddress;}
 	virtual EnCastMode GetCastMode		()	{return m_enCastMode;}
 	virtual int GetMultiCastTtl			()	{return m_iMCTtl;}
 	virtual BOOL IsMultiCastLoop		()	{return m_bMCLoop;}
@@ -97,7 +101,8 @@ protected:
 	virtual void PrepareStart();
 	virtual void Reset();
 
-	virtual void OnWorkerThreadEnd(THR_ID dwThreadID) {}
+	virtual void OnWorkerThreadStart(THR_ID tid) {}
+	virtual void OnWorkerThreadEnd(THR_ID tid) {}
 
 protected:
 	void SetReserved	(PVOID pReserved)	{m_pReserved = pReserved;}						
@@ -106,18 +111,18 @@ protected:
 
 private:
 	void SetRemoteHost	(LPCTSTR lpszHost, USHORT usPort);
+	void SetConnected	(BOOL bConnected = TRUE) {m_bConnected = bConnected; if(bConnected) m_enState = SS_STARTED;}
 
 	BOOL CheckStarting();
 	BOOL CheckStoping();
 	BOOL CreateClientSocket(LPCTSTR lpszRemoteAddress, USHORT usPort, LPCTSTR lpszBindAddress, HP_SOCKADDR& bindAddr);
 	BOOL BindClientSocket(HP_SOCKADDR& bindAddr);
 	BOOL ConnectToGroup(const HP_SOCKADDR& bindAddr);
-	BOOL SetMultiCastSocketOptions(const HP_SOCKADDR& bindAddr);
 	BOOL CreateWorkerThread();
 	BOOL ProcessNetworkEvent(SHORT events);
 	BOOL ReadData();
 	BOOL SendData();
-	BOOL DoSendData(TItem* pItem);
+	BOOL DoSendData(TItem* pItem, BOOL& bBlocked);
 	int SendInternal(TItemPtr& itPtr);
 	void WaitForWorkerThreadEnd();
 
@@ -125,19 +130,14 @@ private:
 	BOOL HandleRead(SHORT events);
 	BOOL HandleWrite(SHORT events);
 
-	void SetConnected	() {m_bConnected = TRUE; m_enState = SS_STARTED;}
-	BOOL HasConnected	() {return m_bConnected;}
-
 	UINT WINAPI WorkerThreadProc(LPVOID pv);
 
 public:
 	CUdpCast(IUdpCastListener* pListener)
 	: m_pListener			(pListener)
 	, m_lsSend				(m_itPool)
-	, m_soRecv				(INVALID_SOCKET)
-	, m_soSend				(INVALID_SOCKET)
-	, m_nRecvEvents			(0)
-	, m_nSendEvents			(0)
+	, m_soClient			(INVALID_SOCKET)
+	, m_nEvents				(0)
 	, m_dwConnID			(0)
 	, m_usPort				(0)
 	, m_bPaused				(FALSE)
@@ -146,10 +146,10 @@ public:
 	, m_enState				(SS_STOPPED)
 	, m_pExtra				(nullptr)
 	, m_pReserved			(nullptr)
+	, m_enReusePolicy		(RAP_ADDR_ONLY)
 	, m_dwMaxDatagramSize	(DEFAULT_UDP_MAX_DATAGRAM_SIZE)
 	, m_dwFreeBufferPoolSize(DEFAULT_CLIENT_FREE_BUFFER_POOL_SIZE)
 	, m_dwFreeBufferPoolHold(DEFAULT_CLIENT_FREE_BUFFER_POOL_HOLD)
-	, m_bReuseAddress		(FALSE)
 	, m_iMCTtl				(1)
 	, m_bMCLoop				(FALSE)
 	, m_enCastMode			(CM_MULTICAST)
@@ -161,20 +161,20 @@ public:
 
 	virtual ~CUdpCast()
 	{
-		Stop();
+		ENSURE_STOP();
 	}
 
 private:
+	CSEM				m_evWait;
+
 	IUdpCastListener*	m_pListener;
 	TClientCloseContext m_ccContext;
 
-	SOCKET				m_soRecv;
-	SOCKET				m_soSend;
-	SHORT				m_nRecvEvents;
-	SHORT				m_nSendEvents;
+	SOCKET				m_soClient;
+	SHORT				m_nEvents;
 	CONNID				m_dwConnID;
 
-	BOOL				m_bReuseAddress;
+	EnReuseAddressPolicy m_enReusePolicy;
 	DWORD				m_dwMaxDatagramSize;
 	DWORD				m_dwFreeBufferPoolSize;
 	DWORD				m_dwFreeBufferPoolHold;
@@ -215,3 +215,5 @@ private:
 
 	CThread<CUdpCast, VOID, UINT> m_thWorker;
 };
+
+#endif

@@ -2,11 +2,11 @@
 * Copyright: JessMA Open Source (ldcsaa@gmail.com)
 *
 * Author	: Bruce Liang
-* Website	: http://www.jessma.org
-* Project	: https://github.com/ldcsaa
+* Website	: https://github.com/ldcsaa
+* Project	: https://github.com/ldcsaa/HP-Socket
 * Blog		: http://www.cnblogs.com/ldcsaa
 * Wiki		: http://www.oschina.net/p/hp-socket
-* QQ Group	: 75375912, 44636872
+* QQ Group	: 44636872, 75375912
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -46,19 +46,45 @@
 
 using namespace std;
 
-#define FPRINTLN(fd, fmt, ...)			fprintf((fd), fmt "\n", ##__VA_ARGS__)
+#if !defined(__ANDROID__)
+	typedef atomic_ulong				atomic_tid;
+
+	#define FPRINTLN(fd, fmt, ...)		fprintf((fd), fmt "\n", ##__VA_ARGS__)
+#else
+	typedef atomic_long					atomic_tid;
+
+	#if !defined(EFD_SEMAPHORE)
+		#define EFD_SEMAPHORE			00000001
+	#endif
+
+	#if defined(stdout)
+		#undef stdout
+	#endif
+
+	#if defined(stderr)
+		#undef stderr
+	#endif
+
+	#define stdout	nullptr
+	#define stderr	nullptr
+
+	#define FPRINTLN(fd, fmt, ...)		printf(fmt "\n", ##__VA_ARGS__)
+#endif
+
 #define PRINTLN(fmt, ...)				FPRINTLN(stdout, fmt, ##__VA_ARGS__)
 
 #if defined(DEBUG) && defined(DEBUG_TRACE)
-	#define TRACE(fmt, ...)				PRINTLN("> TRC (0x%8X, %d) " fmt, SELF_THREAD_ID, SELF_NATIVE_THREAD_ID, ##__VA_ARGS__)
+	#define TRACE(fmt, ...)				PRINTLN("> TRC (0x%zX, %d) " fmt, (SIZE_T)SELF_THREAD_ID, SELF_NATIVE_THREAD_ID, ##__VA_ARGS__)
 #else
 	#define TRACE(fmt, ...)
 #endif
 
-#define ASSERT							assert
-#define VERIFY(expr)					((expr) ? TRUE : (ERROR_EXIT2(EXIT_CODE_SOFTWARE, ERROR_VERIFY_CHECK), FALSE))
+#define ASSERT(expr)					((expr) ? TRUE : (::PrintStackTrace(), assert((FALSE)), FALSE))
+#define VERIFY(expr)					((expr) ? TRUE : (::PrintStackTrace(), ERROR_ABORT2(ERROR_VERIFY_CHECK), FALSE))
 #define ASSERT_IS_NO_ERROR(expr)		ASSERT(IS_NO_ERROR(expr))
 #define VERIFY_IS_NO_ERROR(expr)		VERIFY(IS_NO_ERROR(expr))
+#define	ENSURE(expr)					VERIFY(expr)
+#define ENSURE_IS_NO_ERROR(expr)		VERIFY_IS_NO_ERROR(expr)
 
 #define TEMP_FAILURE_RETRY_INT(exp)		((int)TEMP_FAILURE_RETRY(exp))
 
@@ -89,6 +115,9 @@ using namespace std;
 #define IS_IO_PENDING_ERROR()			IS_ERROR(ERROR_IO_PENDING)
 #define CONTINUE_IO_PENDING_ERROR()		CONTINUE_IF_ERROR(ERROR_IO_PENDING)
 #define BREAK_IO_PENDING_ERROR()		BREAK_IF_ERROR(ERROR_IO_PENDING)
+#define IS_INTR_ERROR()					IS_ERROR(ERROR_INTR)
+#define CONTINUE_INTR_ERROR()			CONTINUE_IF_ERROR(ERROR_INTR)
+#define BREAK_INTR_ERROR()				BREAK_IF_ERROR(ERROR_INTR)
 
 #define EqualMemory(dest, src, len)		(!memcmp((dest), (src), (len)))
 #define MoveMemory(dest, src, len)		memmove((dest), (src), (len))
@@ -112,10 +141,16 @@ inline void PrintError(LPCSTR subject)	{perror(subject);}
 #define TRIGGER(expr)					EXECUTE_RESET_ERROR((expr))
 
 #define _msize(p)						malloc_usable_size(p)
-#define CreateLocalObjects(T, n)		((T*)alloca(sizeof(T) * n))
+#define CreateLocalObjects(T, n)		((T*)alloca(sizeof(T) * (n)))
 #define CreateLocalObject(T)			CreateLocalObjects(T, 1)
 #define CallocObjects(T, n)				((T*)calloc((n), sizeof(T)))
 
+#define MALLOC(T, n)					((T*)malloc(sizeof(T) * (n)))
+#define REALLOC(p, T, n)				((T*)realloc((PVOID)(p), sizeof(T) * (n)))
+#define FREE(p)							free((PVOID)(p))
+
+#define InterlockedAdd(p, n)			__atomic_fetch_add((p), (n), memory_order_seq_cst)
+#define InterlockedSub(p, n)			__atomic_fetch_sub((p), (n), memory_order_seq_cst)
 #define InterlockedExchangeAdd(p, n)	__atomic_add_fetch((p), (n), memory_order_seq_cst)
 #define InterlockedExchangeSub(p, n)	__atomic_sub_fetch((p), (n), memory_order_seq_cst)
 #define InterlockedIncrement(p)			InterlockedExchangeAdd((p), 1)
@@ -207,15 +242,19 @@ inline LPSTR TrimRitht(LPSTR* lpStr, LPCSTR lpDelim = " \t\r\n")
 
 inline BOOL IsStrEmptyA(LPCSTR lpsz)	{return (lpsz == nullptr || lpsz[0] == 0);}
 inline BOOL IsStrEmptyW(LPCWSTR lpsz)	{return (lpsz == nullptr || lpsz[0] == 0);}
+inline BOOL IsStrNotEmptyA(LPCSTR lpsz)	{return !IsStrEmptyA(lpsz);}
+inline BOOL IsStrNotEmptyW(LPCWSTR lpsz){return !IsStrEmptyW(lpsz);}
 inline LPCSTR SafeStrA(LPCSTR lpsz)		{return (lpsz != nullptr) ? lpsz : "";}
 inline LPCWSTR SafeStrW(LPCWSTR lpsz)	{return (lpsz != nullptr) ? lpsz : L"";}
 
 #ifdef _UNICODE
-	#define IsStrEmpty					IsStrEmptyW
-	#define SafeStr						SafeStrW
+	#define IsStrEmpty(lpsz)			IsStrEmptyW(lpsz)
+	#define IsStrNotEmpty(lpsz)			IsStrNotEmptyW(lpsz)
+	#define SafeStr(lpsz)				SafeStrW(lpsz)
 #else
-	#define IsStrEmpty					IsStrEmptyA
-	#define SafeStr						SafeStrA
+	#define IsStrEmpty(lpsz)			IsStrEmptyA(lpsz)
+	#define IsStrNotEmpty(lpsz)			IsStrNotEmptyA(lpsz)
+	#define SafeStr(lpsz)				SafeStrA(lpsz)
 #endif
 
 inline int lstrlen(LPCTSTR p)							{return (int)tstrlen(p);}
@@ -241,9 +280,19 @@ template <typename T, size_t N> char (&_ArraySizeHelper(const T(&arr)[N]))[N];
 	#define __countof(arr)	ARRAY_SIZE(arr)
 #endif
 
-INT YieldThread(UINT i = INFINITE);
-INT WaitFor(DWORD dwMillSecond, DWORD dwSecond = 0);
-INT Sleep(DWORD dwMillSecond, DWORD dwSecond = 0);
+#define THREAD_YIELD_CYCLE	63
+#define THREAD_SWITCH_CYCLE	4095
+
+inline void YieldThread(UINT i = THREAD_YIELD_CYCLE)
+{
+	if((i & THREAD_SWITCH_CYCLE) == THREAD_SWITCH_CYCLE)
+		::SwitchToThread();
+	else if((i & THREAD_YIELD_CYCLE) == THREAD_YIELD_CYCLE)
+		::YieldProcessor();
+}
+
+INT WaitFor(DWORD dwMillSecond, DWORD dwSecond = 0, BOOL bExceptThreadInterrupted = FALSE);
+INT Sleep(DWORD dwMillSecond, DWORD dwSecond = 0, BOOL bExceptThreadInterrupted = FALSE);
 
 __time64_t	_time64(time_t* ptm = nullptr);
 __time64_t	_mkgmtime64(tm* ptm);
@@ -251,17 +300,21 @@ tm*			_gmtime64(tm* ptm, __time64_t* pt);
 
 DWORD		TimeGetTime();
 ULLONG		TimeGetTime64();
-DWORD		GetTimeGap32(DWORD dwOriginal);
-ULLONG		GetTimeGap64(ULLONG ullOriginal);
+DWORD		GetTimeGap32(DWORD dwOriginal, DWORD dwCurrent = 0);
+ULLONG		GetTimeGap64(ULLONG ullOriginal, ULONGLONG ullCurrent = 0);
 LLONG		TimevalToMillisecond(const timeval& tv);
 timeval&	MillisecondToTimeval(LLONG ms, timeval& tv);
 LLONG		TimespecToMillisecond(const timespec& ts);
 timespec&	MillisecondToTimespec(LLONG ms, timespec& ts);
-timeval&	GetFutureTimeval(LLONG ms, timeval& tv, __timezone_ptr_t ptz = nullptr);
+timeval&	GetFutureTimeval(LLONG ms, timeval& tv, struct timezone* ptz = nullptr);
 timespec&	GetFutureTimespec(LLONG ms, timespec& ts, clockid_t clkid = CLOCK_MONOTONIC);
+
+FD			CreateTimer(LLONG llInterval, LLONG llStart = -1, BOOL bRealTimeClock = FALSE);
+BOOL		ReadTimer(FD tmr, ULLONG* pVal = nullptr, BOOL* pRs = nullptr);
 
 BOOL fcntl_SETFL(FD fd, INT fl, BOOL bSet = TRUE);
 
+void PrintStackTrace();
 void EXIT(int iExitCode = 0, int iErrno = -1, LPCSTR lpszFile = nullptr, int iLine = 0, LPCSTR lpszFunc = nullptr, LPCSTR lpszTitle = nullptr);
 void _EXIT(int iExitCode = 0, int iErrno = -1, LPCSTR lpszFile = nullptr, int iLine = 0, LPCSTR lpszFunc = nullptr, LPCSTR lpszTitle = nullptr);
 void ABORT(int iErrno = -1, LPCSTR lpszFile = nullptr, int iLine = 0, LPCSTR lpszFunc = nullptr, LPCSTR lpszTitle = nullptr);
@@ -363,53 +416,3 @@ C* _n_2_c(T value, C* lpszDest, int radix)
 #define HEX_DOUBLE_CHAR_TO_VALUE(pc)	((BYTE)(((HEX_CHAR_TO_VALUE(*(pc))) << 4) | (HEX_CHAR_TO_VALUE(*((pc) + 1)))))
 #define HEX_VALUE_TO_CHAR(n)			(n <= 9 ? n + '0' : (n <= 'F' ? n + 'A' - 0X0A : n + 'a' - 0X0A))
 #define HEX_VALUE_TO_DOUBLE_CHAR(pc, n)	{*(pc) = (BYTE)HEX_VALUE_TO_CHAR((n >> 4)); *((pc) + 1) = (BYTE)HEX_VALUE_TO_CHAR((n & 0X0F));}
-
-
-#define CHARSET_GBK			"GBK"
-#define CHARSET_UTF_8		"UTF-8"
-#define CHARSET_UTF_16LE	"UTF-16LE"
-#define CHARSET_UTF_32LE	"UTF-32LE"
-
-// Charset A -> Charset B
-BOOL CharsetConvert(LPCSTR lpszFromCharset, LPCSTR lpszToCharset, LPCSTR lpszInBuf, int iInBufLen, LPSTR lpszOutBuf, int& iOutBufLen);
-
-// GBK -> UNICODE
-BOOL GbkToUnicode(const char szSrc[], WCHAR szDest[], int& iDestLength);
-// UNICODE -> GBK
-BOOL UnicodeToGbk(const WCHAR szSrc[], char szDest[], int& iDestLength);
-// UTF8 -> UNICODE
-BOOL Utf8ToUnicode(const char szSrc[], WCHAR szDest[], int& iDestLength);
-// UNICODE -> UTF8
-BOOL UnicodeToUtf8(const WCHAR szSrc[], char szDest[], int& iDestLength);
-// GBK -> UTF8
-BOOL GbkToUtf8(const char szSrc[], char szDest[], int& iDestLength);
-// UTF8 -> GBK
-BOOL Utf8ToGbk(const char szSrc[], char szDest[], int& iDestLength);
-
-/*
-#define GbkToUtf8(in_buf, in_len, out_buf, out_len)		CharsetConvert("GBK", "UTF-8", (in_buf), (in_len), (out_buf), (out_len))
-#define Utf8ToGbk(in_buf, in_len, out_buf, out_len)		CharsetConvert("UTF-8", "GBK", (in_buf), (in_len), (out_buf), (out_len))
-#define GbkToUtf16(in_buf, in_len, out_buf, out_len)	CharsetConvert("GBK", "UTF-16LE", (in_buf), (in_len), (out_buf), (out_len))
-#define Utf16ToGbk(in_buf, in_len, out_buf, out_len)	CharsetConvert("UTF-16LE", "GBK", (in_buf), (in_len), (out_buf), (out_len))
-#define Utf16ToUtf8(in_buf, in_len, out_buf, out_len)	CharsetConvert("UTF-16LE", "UTF-8", (in_buf), (in_len), (out_buf), (out_len))
-#define Utf8ToUtf16(in_buf, in_len, out_buf, out_len)	CharsetConvert("UTF-8", "UTF-16LE", (in_buf), (in_len), (out_buf), (out_len))
-*/
-
-// 计算 Base64 编码后长度
-DWORD GuessBase64EncodeBound(DWORD dwSrcLen);
-// 计算 Base64 解码后长度
-DWORD GuessBase64DecodeBound(const BYTE* lpszSrc, DWORD dwSrcLen);
-// Base64 编码（返回值：0 -> 成功，-3 -> 输入数据不正确，-5 -> 输出缓冲区不足）
-int Base64Encode(const BYTE* lpszSrc, DWORD dwSrcLen, BYTE* lpszDest, DWORD& dwDestLen);
-// Base64 解码（返回值：0 -> 成功，-3 -> 输入数据不正确，-5 -> 输出缓冲区不足）
-int Base64Decode(const BYTE* lpszSrc, DWORD dwSrcLen, BYTE* lpszDest, DWORD& dwDestLen);
-
-// 计算 URL 编码后长度
-DWORD GuessUrlEncodeBound(const BYTE* lpszSrc, DWORD dwSrcLen);
-// 计算 URL 解码后长度
-DWORD GuessUrlDecodeBound(const BYTE* lpszSrc, DWORD dwSrcLen);
-// URL 编码（返回值：0 -> 成功，-3 -> 输入数据不正确，-5 -> 输出缓冲区不足）
-int UrlEncode(BYTE* lpszSrc, DWORD dwSrcLen, BYTE* lpszDest, DWORD& dwDestLen);
-// URL 解码（返回值：0 -> 成功，-3 -> 输入数据不正确，-5 -> 输出缓冲区不足）
-int UrlDecode(BYTE* lpszSrc, DWORD dwSrcLen, BYTE* lpszDest, DWORD& dwDestLen);
-

@@ -2,11 +2,11 @@
  * Copyright: JessMA Open Source (ldcsaa@gmail.com)
  *
  * Author	: Bruce Liang
- * Website	: http://www.jessma.org
- * Project	: https://github.com/ldcsaa
+ * Website	: https://github.com/ldcsaa
+ * Project	: https://github.com/ldcsaa/HP-Socket
  * Blog		: http://www.cnblogs.com/ldcsaa
  * Wiki		: http://www.oschina.net/p/hp-socket
- * QQ Group	: 75375912, 44636872
+ * QQ Group	: 44636872, 75375912
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -220,6 +220,17 @@ typedef CHPSocketPtr<ITcpPackClient, ITcpClientListener, SSLPackClient_Creator>	
 /*****************************************************************************************************************************************************/
 /*************************************************************** Global Function Exports *************************************************************/
 /*****************************************************************************************************************************************************/
+
+/*
+* 名称：SNI 默认回调函数
+* 描述：HP_SSLServer_SetupSSLContext 方法中如果不指定 SNI 回调函数则使用此 SNI 默认回调函数
+*
+* 参数：		lpszServerName	-- 请求域名
+*			pContext		-- SSL Context 对象
+*
+* 返回值：SNI 主机证书对应的索引
+*/
+HPSOCKET_API int __HP_CALL HP_SSL_DefaultServerNameCallback(LPCTSTR lpszServerName, PVOID pContext);
 
 /*
 * 名称：清理线程局部环境 SSL 资源

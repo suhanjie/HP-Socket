@@ -2,11 +2,11 @@
  * Copyright: JessMA Open Source (ldcsaa@gmail.com)
  *
  * Author	: Bruce Liang
- * Website	: http://www.jessma.org
- * Project	: https://github.com/ldcsaa
+ * Website	: https://github.com/ldcsaa
+ * Project	: https://github.com/ldcsaa/HP-Socket
  * Blog		: http://www.cnblogs.com/ldcsaa
  * Wiki		: http://www.oschina.net/p/hp-socket
- * QQ Group	: 75375912, 44636872
+ * QQ Group	: 44636872, 75375912
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -34,6 +34,7 @@ template<class T> class CTcpPackClientT : public IPackClient, public T
 
 public:
 	using __super::Stop;
+	using __super::GetState;
 
 public:
 	virtual BOOL SendPackets(const WSABUF pBuffers[], int iCount)
@@ -41,8 +42,8 @@ public:
 		int iNewCount = iCount + 1;
 		unique_ptr<WSABUF[]> buffers(new WSABUF[iNewCount]);
 
-		DWORD header;
-		if(!::AddPackHeader(pBuffers, iCount, buffers, m_dwMaxPackSize, m_usHeaderFlag, header))
+		DWORD dwHeader;
+		if(!::AddPackHeader(pBuffers, iCount, buffers, m_dwMaxPackSize, m_usHeaderFlag, dwHeader))
 			return FALSE;
 
 		return __super::SendPackets(buffers.get(), iNewCount);
@@ -51,7 +52,12 @@ public:
 protected:
 	virtual EnHandleResult DoFireReceive(ITcpClient* pSender, const BYTE* pData, int iLength)
 	{
-		return ParsePack(this, &m_pkInfo, &m_lsBuffer, pSender, m_dwMaxPackSize, m_usHeaderFlag, pData, iLength);
+		return ParsePack(this, &m_pkInfo, &m_lsBuffer, (CTcpPackClientT*)pSender, m_dwMaxPackSize, m_usHeaderFlag, pData, iLength);
+	}
+
+	virtual BOOL BeforeUnpause()
+	{
+		return (ParsePack(this, &m_pkInfo, &m_lsBuffer, (CTcpPackClientT*)this, m_dwMaxPackSize, m_usHeaderFlag) != HR_ERROR);
 	}
 
 	virtual BOOL CheckParams()
@@ -73,8 +79,8 @@ protected:
 	}
 
 public:
-	virtual void SetMaxPackSize		(DWORD dwMaxPackSize)		{m_dwMaxPackSize = dwMaxPackSize;}
-	virtual void SetPackHeaderFlag	(USHORT usPackHeaderFlag)	{m_usHeaderFlag  = usPackHeaderFlag;}
+	virtual void SetMaxPackSize		(DWORD dwMaxPackSize)		{ENSURE_HAS_STOPPED(); m_dwMaxPackSize = dwMaxPackSize;}
+	virtual void SetPackHeaderFlag	(USHORT usPackHeaderFlag)	{ENSURE_HAS_STOPPED(); m_usHeaderFlag  = usPackHeaderFlag;}
 	virtual DWORD GetMaxPackSize	()							{return m_dwMaxPackSize;}
 	virtual USHORT GetPackHeaderFlag()							{return m_usHeaderFlag;}
 
@@ -82,8 +88,8 @@ private:
 	EnHandleResult DoFireSuperReceive(ITcpClient* pSender, const BYTE* pData, int iLength)
 		{return __super::DoFireReceive(pSender, pData, iLength);}
 
-	friend EnHandleResult ParsePack<>	(CTcpPackClientT* pThis, TPackInfo<TItemListEx>* pInfo, TItemListEx* pBuffer, ITcpClient* pSocket,
-										DWORD dwMaxPackSize, USHORT usPackHeaderFlag, const BYTE* pData, int iLength);
+	friend EnHandleResult ParsePack<>	(CTcpPackClientT* pThis, TPackInfo<TItemListEx>* pInfo, TItemListEx* pBuffer, CTcpPackClientT* pSocket,
+										DWORD dwMaxPackSize, USHORT usPackHeaderFlag);
 
 public:
 	CTcpPackClientT(ITcpClientListener* pListener)
@@ -98,7 +104,7 @@ public:
 
 	virtual ~CTcpPackClientT()
 	{
-		Stop();
+		ENSURE_STOP();
 	}
 
 private:

@@ -2,11 +2,11 @@
  * Copyright: JessMA Open Source (ldcsaa@gmail.com)
  *
  * Author	: Bruce Liang
- * Website	: http://www.jessma.org
- * Project	: https://github.com/ldcsaa
+ * Website	: https://github.com/ldcsaa
+ * Project	: https://github.com/ldcsaa/HP-Socket
  * Blog		: http://www.cnblogs.com/ldcsaa
  * Wiki		: http://www.oschina.net/p/hp-socket
- * QQ Group	: 75375912, 44636872
+ * QQ Group	: 44636872, 75375912
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -28,6 +28,54 @@
 /*****************************************************************************************************************************************************/
 /***************************************************************** TCP/UDP Interfaces ****************************************************************/
 /*****************************************************************************************************************************************************/
+
+/************************************************************************
+名称：双接口模版类
+描述：定义双接口转换方法
+************************************************************************/
+template<class F, class S> class DualInterface : public F, public S
+{
+public:
+
+	/* this 转换为 F* */
+	inline static F* ToF(DualInterface* pThis)
+	{
+		return (F*)(pThis);
+	}
+
+	/* F* 转换为 this */
+	inline static DualInterface* FromF(F* pF)
+	{
+		return (DualInterface*)(pF);
+	}
+
+	/* this 转换为 S* */
+	inline static S* ToS(DualInterface* pThis)
+	{
+		return (S*)(F2S(ToF(pThis)));
+	}
+
+	/* S* 转换为 this */
+	inline static DualInterface* FromS(S* pS)
+	{
+		return FromF(S2F(pS));
+	}
+
+	/* S* 转换为 F* */
+	inline static F* S2F(S* pS)
+	{
+		return (F*)((char*)pS - sizeof(F));
+	}
+
+	/* F* 转换为 S* */
+	inline static S* F2S(F* pF)
+	{
+		return (S*)((char*)pF + sizeof(F));
+	}
+
+public:
+	virtual ~DualInterface() = default;
+};
 
 /************************************************************************
 名称：复合 Socket 组件接口
@@ -59,7 +107,7 @@ public:
 	*			iLength		-- 发送缓冲区长度
 	*			iOffset		-- 发送缓冲区指针偏移量
 	* 返回值：	TRUE	-- 成功
-	*			FALSE	-- 失败，可通过 Windows API 函数 ::GetLastError() 获取 Windows 错误代码
+	*			FALSE	-- 失败，可通过 SYS_GetLastError() 获取错误代码
 	*/
 	virtual BOOL Send	(CONNID dwConnID, const BYTE* pBuffer, int iLength, int iOffset = 0)	= 0;
 
@@ -73,7 +121,7 @@ public:
 	*			pBuffers	-- 发送缓冲区数组
 	*			iCount		-- 发送缓冲区数目
 	* 返回值：	TRUE	-- 成功
-	*			FALSE	-- 失败，可通过 Windows API 函数 ::GetLastError() 获取 Windows 错误代码
+	*			FALSE	-- 失败，可通过 SYS_GetLastError() 获取错误代码
 	*/
 	virtual BOOL SendPackets(CONNID dwConnID, const WSABUF pBuffers[], int iCount)	= 0;
 
@@ -121,6 +169,16 @@ public:
 	*/
 	virtual BOOL DisconnectSilenceConnections(DWORD dwPeriod, BOOL bForce = TRUE)	= 0;
 
+	/*
+	* 名称：等待
+	* 描述：等待通信组件停止运行
+	*		
+	* 参数：		dwMilliseconds	-- 超时时间（毫秒，默认：-1，永不超时）
+	* 返回值：	TRUE	-- 成功
+	*			FALSE	-- 失败，可通过 SYS_GetLastError() 获取错误代码
+	*/
+	virtual BOOL Wait(DWORD dwMilliseconds = INFINITE)								= 0;
+
 public:
 
 	/***********************************************************************/
@@ -146,72 +204,82 @@ public:
 	* 返回值：	TRUE	-- 成功
 	*			FALSE	-- 失败（无效的连接 ID）
 	*/
-	virtual BOOL GetConnectionExtra			(CONNID dwConnID, PVOID* ppExtra)	= 0;
+	virtual BOOL GetConnectionExtra		(CONNID dwConnID, PVOID* ppExtra)		= 0;
 
 	/* 检测是否为安全连接（SSL/HTTPS） */
-	virtual BOOL IsSecure				()									= 0;
+	virtual BOOL IsSecure				()										= 0;
 	/* 检查通信组件是否已启动 */
-	virtual BOOL HasStarted				()									= 0;
+	virtual BOOL HasStarted				()										= 0;
 	/* 查看通信组件当前状态 */
-	virtual EnServiceState GetState		()									= 0;
+	virtual EnServiceState GetState		()										= 0;
 	/* 获取连接数 */
-	virtual DWORD GetConnectionCount	()									= 0;
+	virtual DWORD GetConnectionCount	()										= 0;
 	/* 获取所有连接的 CONNID */
-	virtual BOOL GetAllConnectionIDs	(CONNID pIDs[], DWORD& dwCount)		= 0;
+	virtual BOOL GetAllConnectionIDs	(CONNID pIDs[], DWORD& dwCount)			= 0;
 	/* 获取某个连接时长（毫秒） */
-	virtual BOOL GetConnectPeriod		(CONNID dwConnID, DWORD& dwPeriod)	= 0;
+	virtual BOOL GetConnectPeriod		(CONNID dwConnID, DWORD& dwPeriod)		= 0;
 	/* 获取某个连接静默时间（毫秒） */
-	virtual BOOL GetSilencePeriod		(CONNID dwConnID, DWORD& dwPeriod)	= 0;
+	virtual BOOL GetSilencePeriod		(CONNID dwConnID, DWORD& dwPeriod)		= 0;
 	/* 获取某个连接的本地地址信息 */
 	virtual BOOL GetLocalAddress		(CONNID dwConnID, TCHAR lpszAddress[], int& iAddressLen, USHORT& usPort)	= 0;
 	/* 获取某个连接的远程地址信息 */
 	virtual BOOL GetRemoteAddress		(CONNID dwConnID, TCHAR lpszAddress[], int& iAddressLen, USHORT& usPort)	= 0;
 	/* 获取最近一次失败操作的错误代码 */
-	virtual EnSocketError GetLastError	()									= 0;
+	virtual EnSocketError GetLastError	()										= 0;
 	/* 获取最近一次失败操作的错误描述 */
-	virtual LPCTSTR GetLastErrorDesc	()									= 0;
+	virtual LPCTSTR GetLastErrorDesc	()										= 0;
 	/* 获取连接中未发出数据的长度 */
-	virtual BOOL GetPendingDataLength	(CONNID dwConnID, int& iPending)	= 0;
+	virtual BOOL GetPendingDataLength	(CONNID dwConnID, int& iPending)		= 0;
 	/* 获取连接的数据接收状态 */
-	virtual BOOL IsPauseReceive			(CONNID dwConnID, BOOL& bPaused)	= 0;
+	virtual BOOL IsPauseReceive			(CONNID dwConnID, BOOL& bPaused)		= 0;
+	/* 检测是否有效连接 */
+	virtual BOOL IsConnected			(CONNID dwConnID)						= 0;
 
-	/* 设置数据发送策略 （对 Linux 平台组件无效） */
-	virtual void SetSendPolicy				(EnSendPolicy enSendPolicy)		= 0;
+	/* 设置地址重用选项 */
+	virtual void SetReuseAddressPolicy(EnReuseAddressPolicy enReusePolicy)		= 0;
+	/* 设置数据发送策略（对 Linux 平台组件无效） */
+	virtual void SetSendPolicy				(EnSendPolicy enSendPolicy)			= 0;
+	/* 设置 OnSend 事件同步策略（对 Linux 平台组件无效） */
+	virtual void SetOnSendSyncPolicy		(EnOnSendSyncPolicy enSyncPolicy)	= 0;
 	/* 设置最大连接数（组件会根据设置值预分配内存，因此需要根据实际情况设置，不宜过大）*/
-	virtual void SetMaxConnectionCount		(DWORD dwMaxConnectionCount)	= 0;
+	virtual void SetMaxConnectionCount		(DWORD dwMaxConnectionCount)		= 0;
 	/* 设置 Socket 缓存对象锁定时间（毫秒，在锁定期间该 Socket 缓存对象不能被获取使用） */
-	virtual void SetFreeSocketObjLockTime	(DWORD dwFreeSocketObjLockTime)	= 0;
+	virtual void SetFreeSocketObjLockTime	(DWORD dwFreeSocketObjLockTime)		= 0;
 	/* 设置 Socket 缓存池大小（通常设置为平均并发连接数的 1/3 - 1/2） */
-	virtual void SetFreeSocketObjPool		(DWORD dwFreeSocketObjPool)		= 0;
+	virtual void SetFreeSocketObjPool		(DWORD dwFreeSocketObjPool)			= 0;
 	/* 设置内存块缓存池大小（通常设置为 Socket 缓存池大小的 2 - 3 倍） */
-	virtual void SetFreeBufferObjPool		(DWORD dwFreeBufferObjPool)		= 0;
+	virtual void SetFreeBufferObjPool		(DWORD dwFreeBufferObjPool)			= 0;
 	/* 设置 Socket 缓存池回收阀值（通常设置为 Socket 缓存池大小的 3 倍） */
-	virtual void SetFreeSocketObjHold		(DWORD dwFreeSocketObjHold)		= 0;
+	virtual void SetFreeSocketObjHold		(DWORD dwFreeSocketObjHold)			= 0;
 	/* 设置内存块缓存池回收阀值（通常设置为内存块缓存池大小的 3 倍） */
-	virtual void SetFreeBufferObjHold		(DWORD dwFreeBufferObjHold)		= 0;
+	virtual void SetFreeBufferObjHold		(DWORD dwFreeBufferObjHold)			= 0;
 	/* 设置工作线程数量（通常设置为 2 * CPU + 2） */
-	virtual void SetWorkerThreadCount		(DWORD dwWorkerThreadCount)		= 0;
+	virtual void SetWorkerThreadCount		(DWORD dwWorkerThreadCount)			= 0;
 	/* 设置是否标记静默时间（设置为 TRUE 时 DisconnectSilenceConnections() 和 GetSilencePeriod() 才有效，默认：TRUE） */
-	virtual void SetMarkSilence				(BOOL bMarkSilence)				= 0;
+	virtual void SetMarkSilence				(BOOL bMarkSilence)					= 0;
 
-	/* 获取数据发送策略 （对 Linux 平台组件无效） */
-	virtual EnSendPolicy GetSendPolicy		()	= 0;
+	/* 获取地址重用选项 */
+	virtual EnReuseAddressPolicy GetReuseAddressPolicy()	= 0;
+	/* 获取数据发送策略（对 Linux 平台组件无效） */
+	virtual EnSendPolicy GetSendPolicy					()	= 0;
+	/* 获取 OnSend 事件同步策略（对 Linux 平台组件无效） */
+	virtual EnOnSendSyncPolicy GetOnSendSyncPolicy		()	= 0;
 	/* 获取最大连接数 */
-	virtual DWORD GetMaxConnectionCount		()	= 0;
+	virtual DWORD GetMaxConnectionCount					()	= 0;
 	/* 获取 Socket 缓存对象锁定时间 */
-	virtual DWORD GetFreeSocketObjLockTime	()	= 0;
+	virtual DWORD GetFreeSocketObjLockTime				()	= 0;
 	/* 获取 Socket 缓存池大小 */
-	virtual DWORD GetFreeSocketObjPool		()	= 0;
+	virtual DWORD GetFreeSocketObjPool					()	= 0;
 	/* 获取内存块缓存池大小 */
-	virtual DWORD GetFreeBufferObjPool		()	= 0;
+	virtual DWORD GetFreeBufferObjPool					()	= 0;
 	/* 获取 Socket 缓存池回收阀值 */
-	virtual DWORD GetFreeSocketObjHold		()	= 0;
+	virtual DWORD GetFreeSocketObjHold					()	= 0;
 	/* 获取内存块缓存池回收阀值 */
-	virtual DWORD GetFreeBufferObjHold		()	= 0;
+	virtual DWORD GetFreeBufferObjHold					()	= 0;
 	/* 获取工作线程数量 */
-	virtual DWORD GetWorkerThreadCount		()	= 0;
+	virtual DWORD GetWorkerThreadCount					()	= 0;
 	/* 检测是否标记静默时间 */
-	virtual BOOL IsMarkSilence				()	= 0;
+	virtual BOOL IsMarkSilence							()	= 0;
 
 public:
 	virtual ~IComplexSocket() = default;
@@ -268,9 +336,9 @@ public:
 	*			pHead			-- 头部附加数据
 	*			pTail			-- 尾部附加数据
 	* 返回值：	TRUE	-- 成功
-	*			FALSE	-- 失败，可通过 Windows API 函数 ::GetLastError() 获取 Windows 错误代码
+	*			FALSE	-- 失败，可通过 SYS_GetLastError() 获取错误代码
 	*/
-	virtual BOOL SendSmallFile		(CONNID dwConnID, LPCTSTR lpszFileName, const LPWSABUF pHead = nullptr, const LPWSABUF pTail = nullptr)	= 0;
+	virtual BOOL SendSmallFile(CONNID dwConnID, LPCTSTR lpszFileName, const LPWSABUF pHead = nullptr, const LPWSABUF pTail = nullptr)	= 0;
 
 #ifdef _SSL_SUPPORT
 	/*
@@ -280,14 +348,30 @@ public:
 	* 参数：		iVerifyMode				-- SSL 验证模式（参考 EnSSLVerifyMode）
 	*			lpszPemCertFile			-- 证书文件
 	*			lpszPemKeyFile			-- 私钥文件
-	*			lpszKeyPasswod			-- 私钥密码（没有密码则为空）
+	*			lpszKeyPassword			-- 私钥密码（没有密码则为空）
 	*			lpszCAPemCertFileOrPath	-- CA 证书文件或目录（单向验证或客户端可选）
 	*			fnServerNameCallback	-- SNI 回调函数指针（可选）
 	*
 	* 返回值：	TRUE	-- 成功
 	*			FALSE	-- 失败，可通过 SYS_GetLastError() 获取失败原因
 	*/
-	virtual BOOL SetupSSLContext	(int iVerifyMode = SSL_VM_NONE, LPCTSTR lpszPemCertFile = nullptr, LPCTSTR lpszPemKeyFile = nullptr, LPCTSTR lpszKeyPasswod = nullptr, LPCTSTR lpszCAPemCertFileOrPath = nullptr, Fn_SNI_ServerNameCallback fnServerNameCallback = nullptr)	= 0;
+	virtual BOOL SetupSSLContext(int iVerifyMode = SSL_VM_NONE, LPCTSTR lpszPemCertFile = nullptr, LPCTSTR lpszPemKeyFile = nullptr, LPCTSTR lpszKeyPassword = nullptr, LPCTSTR lpszCAPemCertFileOrPath = nullptr, Fn_SNI_ServerNameCallback fnServerNameCallback = nullptr)	= 0;
+
+	/*
+	* 名称：初始化通信组件 SSL 环境参数（通过内存加载证书）
+	* 描述：SSL 环境参数必须在 SSL 通信组件启动前完成初始化，否则启动失败
+	*		
+	* 参数：		iVerifyMode				-- SSL 验证模式（参考 EnSSLVerifyMode）
+	*			lpszPemCert				-- 证书内容
+	*			lpszPemKey				-- 私钥内容
+	*			lpszKeyPassword			-- 私钥密码（没有密码则为空）
+	*			lpszCAPemCert			-- CA 证书内容（单向验证或客户端可选）
+	*			fnServerNameCallback	-- SNI 回调函数指针（可选，如果为 nullptr 则使用 SNI 默认回调函数）
+	*
+	* 返回值：	TRUE	-- 成功
+	*			FALSE	-- 失败，可通过 SYS_GetLastError() 获取失败原因
+	*/
+	virtual BOOL SetupSSLContextByMemory(int iVerifyMode = SSL_VM_NONE, LPCSTR lpszPemCert = nullptr, LPCSTR lpszPemKey = nullptr, LPCSTR lpszKeyPassword = nullptr, LPCSTR lpszCAPemCert = nullptr, Fn_SNI_ServerNameCallback fnServerNameCallback = nullptr)				= 0;
 
 	/*
 	* 名称：增加 SNI 主机证书
@@ -296,13 +380,40 @@ public:
 	* 参数：		iVerifyMode				-- SSL 验证模式（参考 EnSSLVerifyMode）
 	*			lpszPemCertFile			-- 证书文件
 	*			lpszPemKeyFile			-- 私钥文件
-	*			lpszKeyPasswod			-- 私钥密码（没有密码则为空）
+	*			lpszKeyPassword			-- 私钥密码（没有密码则为空）
 	*			lpszCAPemCertFileOrPath	-- CA 证书文件或目录（单向验证可选）
 	*
 	* 返回值：	正数		-- 成功，并返回 SNI 主机证书对应的索引，该索引用于在 SNI 回调函数中定位 SNI 主机
 	*			负数		-- 失败，可通过 SYS_GetLastError() 获取失败原因
 	*/
-	virtual BOOL AddSSLContext		(int iVerifyMode = SSL_VM_NONE, LPCTSTR lpszPemCertFile = nullptr, LPCTSTR lpszPemKeyFile = nullptr, LPCTSTR lpszKeyPasswod = nullptr, LPCTSTR lpszCAPemCertFileOrPath = nullptr)															= 0;
+	virtual int AddSSLContext(int iVerifyMode = SSL_VM_NONE, LPCTSTR lpszPemCertFile = nullptr, LPCTSTR lpszPemKeyFile = nullptr, LPCTSTR lpszKeyPassword = nullptr, LPCTSTR lpszCAPemCertFileOrPath = nullptr)																= 0;
+
+	/*
+	* 名称：增加 SNI 主机证书（通过内存加载证书）
+	* 描述：SSL 服务端在 SetupSSLContext() 成功后可以调用本方法增加多个 SNI 主机证书
+	*		
+	* 参数：		iVerifyMode				-- SSL 验证模式（参考 EnSSLVerifyMode）
+	*			lpszPemCert				-- 证书内容
+	*			lpszPemKey				-- 私钥内容
+	*			lpszKeyPassword			-- 私钥密码（没有密码则为空）
+	*			lpszCAPemCert			-- CA 证书内容（单向验证可选）
+	*
+	* 返回值：	正数		-- 成功，并返回 SNI 主机证书对应的索引，该索引用于在 SNI 回调函数中定位 SNI 主机
+	*			负数		-- 失败，可通过 SYS_GetLastError() 获取失败原因
+	*/
+	virtual int AddSSLContextByMemory(int iVerifyMode = SSL_VM_NONE, LPCSTR lpszPemCert = nullptr, LPCSTR lpszPemKey = nullptr, LPCSTR lpszKeyPassword = nullptr, LPCSTR lpszCAPemCert = nullptr)																			= 0;
+
+	/*
+	* 名称：绑定 SNI 主机域名
+	* 描述：SSL 服务端在 AddSSLContext() 成功后可以调用本方法绑定主机域名到 SNI 主机证书
+	*		
+	* 参数：		lpszServerName		-- 主机域名
+	*			iContextIndex		-- SNI 主机证书对应的索引
+	*
+	* 返回值：	TRUE	-- 成功
+	*			FALSE	-- 失败，可通过 SYS_GetLastError() 获取失败原因
+	*/
+	virtual BOOL BindSSLServerName(LPCTSTR lpszServerName, int iContextIndex)	= 0;
 
 	/*
 	* 名称：清理通信组件 SSL 运行环境
@@ -314,7 +425,17 @@ public:
 	* 
 	* 返回值：无
 	*/
-	virtual void CleanupSSLContext	()																																																											= 0;
+	virtual void CleanupSSLContext()											= 0;
+
+	/*
+	* 名称：启动 SSL 握手
+	* 描述：当通信组件设置为非自动握手时，需要调用本方法启动 SSL 握手
+	*		
+	* 返回值：	TRUE	-- 成功
+	*			FALSE	-- 失败，可通过 SYS_GetLastError() 获取失败原因
+	*/
+	virtual BOOL StartSSLHandShake(CONNID dwConnID)								= 0;
+
 #endif
 
 public:
@@ -328,9 +449,9 @@ public:
 	virtual void SetSocketBufferSize	(DWORD dwSocketBufferSize)		= 0;
 	/* 设置监听 Socket 的等候队列大小（根据并发连接数量调整设置） */
 	virtual void SetSocketListenQueue	(DWORD dwSocketListenQueue)		= 0;
-	/* 设置正常心跳包间隔（毫秒，0 则不发送心跳包，默认：30 * 1000） */
+	/* 设置正常心跳包间隔（毫秒，0 则不发送心跳包，默认：60 * 1000） */
 	virtual void SetKeepAliveTime		(DWORD dwKeepAliveTime)			= 0;
-	/* 设置异常心跳包间隔（毫秒，0 不发送心跳包，，默认：10 * 1000，如果超过若干次 [默认：WinXP 5 次, Win7 10 次] 检测不到心跳确认包则认为已断线） */
+	/* 设置异常心跳包间隔（毫秒，0 不发送心跳包，，默认：20 * 1000，如果超过若干次 [默认：WinXP 5 次, Win7 10 次] 检测不到心跳确认包则认为已断线） */
 	virtual void SetKeepAliveInterval	(DWORD dwKeepAliveInterval)		= 0;
 
 	/* 获取 EPOLL 等待事件的最大数量 */
@@ -343,7 +464,31 @@ public:
 	virtual DWORD GetKeepAliveTime		()	= 0;
 	/* 获取异常心跳包间隔 */
 	virtual DWORD GetKeepAliveInterval	()	= 0;
+
+#ifdef _SSL_SUPPORT
+	/* 设置通信组件握手方式（默认：TRUE，自动握手） */
+	virtual void SetSSLAutoHandShake(BOOL bAutoHandShake)				= 0;
+	/* 获取通信组件握手方式 */
+	virtual BOOL IsSSLAutoHandShake()									= 0;
+
+	/* 设置 SSL 加密算法列表 */
+	virtual void SetSSLCipherList(LPCTSTR lpszCipherList)				= 0;
+	/* 获取 SSL 加密算法列表 */
+	virtual LPCTSTR GetSSLCipherList()									= 0;
+
+	/*
+	* 名称：获取 SSL Session 信息
+	* 描述：获取指定类型的 SSL Session 信息（输出类型参考：EnSSLSessionInfo）
+	*		
+	* 返回值：	TRUE	-- 成功
+	*			FALSE	-- 失败，可通过 SYS_GetLastError() 获取失败原因
+	*/
+	virtual BOOL GetSSLSessionInfo(CONNID dwConnID, EnSSLSessionInfo enInfo, LPVOID* lppInfo)	= 0;
+#endif
+
 };
+
+#ifdef _UDP_SUPPORT
 
 /************************************************************************
 名称：UDP 通信服务端组件接口
@@ -373,13 +518,90 @@ public:
 
 	/* 设置监测包尝试次数（0 则不发送监测跳包，如果超过最大尝试次数则认为已断线） */
 	virtual void SetDetectAttempts		(DWORD dwDetectAttempts)	= 0;
-	/* 设置监测包发送间隔（秒，0 不发送监测包） */
+	/* 设置监测包发送间隔（毫秒，0 不发送监测包） */
 	virtual void SetDetectInterval		(DWORD dwDetectInterval)	= 0;
 	/* 获取心跳检查次数 */
 	virtual DWORD GetDetectAttempts		()							= 0;
 	/* 获取心跳检查间隔 */
 	virtual DWORD GetDetectInterval		()							= 0;
 };
+
+/************************************************************************
+名称：Server/Agent ARQ 模型组件接口
+描述：定义 Server/Agent 组件的 ARQ 模型组件的所有操作方法
+************************************************************************/
+class IArqSocket
+{
+public:
+
+	/***********************************************************************/
+	/***************************** 组件操作方法 *****************************/
+
+public:
+
+	/***********************************************************************/
+	/***************************** 属性访问方法 *****************************/
+
+	/* 设置是否开启 nodelay 模式（默认：FALSE，不开启） */
+	virtual void SetNoDelay				(BOOL bNoDelay)				= 0;
+	/* 设置是否关闭拥塞控制（默认：FALSE，不关闭） */
+	virtual void SetTurnoffCongestCtrl	(BOOL bTurnOff)				= 0;
+	/* 设置数据刷新间隔（毫秒，默认：60） */
+	virtual void SetFlushInterval		(DWORD dwFlushInterval)		= 0;
+	/* 设置快速重传 ACK 跨越次数（默认：0，关闭快速重传） */
+	virtual void SetResendByAcks		(DWORD dwResendByAcks)		= 0;
+	/* 设置发送窗口大小（数据包数量，默认：128） */
+	virtual void SetSendWndSize			(DWORD dwSendWndSize)		= 0;
+	/* 设置接收窗口大小（数据包数量，默认：512） */
+	virtual void SetRecvWndSize			(DWORD dwRecvWndSize)		= 0;
+	/* 设置最小重传超时时间（毫秒，默认：30） */
+	virtual void SetMinRto				(DWORD dwMinRto)			= 0;
+	/* 设置快速握手次数限制（默认：5，如果为 0 则不限制） */
+	virtual void SetFastLimit			(DWORD dwFastLimit)			= 0;
+	/* 设置最大传输单元（默认：0，与 SetMaxDatagramSize() 一致） */
+	virtual void SetMaxTransUnit		(DWORD dwMaxTransUnit)		= 0;
+	/* 设置最大数据包大小（默认：4096） */
+	virtual void SetMaxMessageSize		(DWORD dwMaxMessageSize)	= 0;
+	/* 设置握手超时时间（毫秒，默认：5000） */
+	virtual void SetHandShakeTimeout	(DWORD dwHandShakeTimeout)	= 0;
+
+	/* 检测是否开启 nodelay 模式 */
+	virtual BOOL IsNoDelay				()							= 0;
+	/* 检测是否关闭拥塞控制 */
+	virtual BOOL IsTurnoffCongestCtrl	()							= 0;
+	/* 获取数据刷新间隔 */
+	virtual DWORD GetFlushInterval		()							= 0;
+	/* 获取快速重传 ACK 跨越次数 */
+	virtual DWORD GetResendByAcks		()							= 0;
+	/* 获取发送窗口大小 */
+	virtual DWORD GetSendWndSize		()							= 0;
+	/* 获取接收窗口大小 */
+	virtual DWORD GetRecvWndSize		()							= 0;
+	/* 获取最小重传超时时间 */
+	virtual DWORD GetMinRto				()							= 0;
+	/* 获取快速握手次数限制 */
+	virtual DWORD GetFastLimit			()							= 0;
+	/* 获取最大传输单元 */
+	virtual DWORD GetMaxTransUnit		()							= 0;
+	/* 获取最大数据包大小 */
+	virtual DWORD GetMaxMessageSize		()							= 0;
+	/* 获取握手超时时间 */
+	virtual DWORD GetHandShakeTimeout	()							= 0;
+
+	/* 获取等待发送包数量 */
+	virtual BOOL GetWaitingSendMessageCount	(CONNID dwConnID, int& iCount)	= 0;
+
+public:
+	virtual ~IArqSocket() = default;
+};
+
+/************************************************************************
+名称：UDP ARQ 通信服务端组件接口
+描述：继承了 ARQ 和 Server 接口
+************************************************************************/
+typedef	DualInterface<IArqSocket, IUdpServer>	IUdpArqServer;
+
+#endif
 
 /************************************************************************
 名称：通信代理组件接口
@@ -401,7 +623,7 @@ public:
 	* 返回值：	TRUE	-- 成功
 	*			FALSE	-- 失败，可通过 GetLastError() 获取错误代码
 	*/
-	virtual BOOL Start	(LPCTSTR lpszBindAddress = nullptr, BOOL bAsyncConnect = TRUE)										= 0;
+	virtual BOOL Start	(LPCTSTR lpszBindAddress = nullptr, BOOL bAsyncConnect = TRUE)				= 0;
 
 	/*
 	* 名称：连接服务器
@@ -411,10 +633,12 @@ public:
 	*			usPort				-- 服务端端口
 	*			pdwConnID			-- 连接 ID（默认：nullptr，不获取连接 ID）
 	*			pExtra				-- 连接附加数据（默认：nullptr）
+	*			usLocalPort			-- 本地端口（默认：0）
+	*			lpszLocalAddress	-- 本地地址（默认：nullptr，使用 Start() 方法中绑定的地址）
 	* 返回值：	TRUE	-- 成功
-	*			FALSE	-- 失败，可通过 Windows API 函数 ::GetLastError() 获取 Windows 错误代码
+	*			FALSE	-- 失败，可通过 SYS_GetLastError() 获取错误代码
 	*/
-	virtual BOOL Connect(LPCTSTR lpszRemoteAddress, USHORT usPort, CONNID* pdwConnID = nullptr, PVOID pExtra = nullptr)		= 0;
+	virtual BOOL Connect(LPCTSTR lpszRemoteAddress, USHORT usPort, CONNID* pdwConnID = nullptr, PVOID pExtra = nullptr, USHORT usLocalPort = 0, LPCTSTR lpszLocalAddress = nullptr)	= 0;
 
 
 public:
@@ -423,7 +647,7 @@ public:
 	/***************************** 属性访问方法 *****************************/
 
 	/* 获取某个连接的远程主机信息 */
-	virtual BOOL GetRemoteHost	(CONNID dwConnID, TCHAR lpszHost[], int& iHostLen, USHORT& usPort)							= 0;
+	virtual BOOL GetRemoteHost	(CONNID dwConnID, TCHAR lpszHost[], int& iHostLen, USHORT& usPort)	= 0;
 
 };
 
@@ -447,9 +671,9 @@ public:
 	*			pHead			-- 头部附加数据
 	*			pTail			-- 尾部附加数据
 	* 返回值：	TRUE	-- 成功
-	*			FALSE	-- 失败，可通过 Windows API 函数 ::GetLastError() 获取 Windows 错误代码
+	*			FALSE	-- 失败，可通过 SYS_GetLastError() 获取错误代码
 	*/
-	virtual BOOL SendSmallFile		(CONNID dwConnID, LPCTSTR lpszFileName, const LPWSABUF pHead = nullptr, const LPWSABUF pTail = nullptr)	= 0;
+	virtual BOOL SendSmallFile(CONNID dwConnID, LPCTSTR lpszFileName, const LPWSABUF pHead = nullptr, const LPWSABUF pTail = nullptr)	= 0;
 
 #ifdef _SSL_SUPPORT
 	/*
@@ -459,13 +683,28 @@ public:
 	* 参数：		iVerifyMode				-- SSL 验证模式（参考 EnSSLVerifyMode）
 	*			lpszPemCertFile			-- 证书文件（客户端可选）
 	*			lpszPemKeyFile			-- 私钥文件（客户端可选）
-	*			lpszKeyPasswod			-- 私钥密码（没有密码则为空）
+	*			lpszKeyPassword			-- 私钥密码（没有密码则为空）
 	*			lpszCAPemCertFileOrPath	-- CA 证书文件或目录（单向验证或客户端可选）
 	*
 	* 返回值：	TRUE	-- 成功
 	*			FALSE	-- 失败，可通过 SYS_GetLastError() 获取失败原因
 	*/
-	virtual BOOL SetupSSLContext	(int iVerifyMode = SSL_VM_NONE, LPCTSTR lpszPemCertFile = nullptr, LPCTSTR lpszPemKeyFile = nullptr, LPCTSTR lpszKeyPasswod = nullptr, LPCTSTR lpszCAPemCertFileOrPath = nullptr)	= 0;
+	virtual BOOL SetupSSLContext(int iVerifyMode = SSL_VM_NONE, LPCTSTR lpszPemCertFile = nullptr, LPCTSTR lpszPemKeyFile = nullptr, LPCTSTR lpszKeyPassword = nullptr, LPCTSTR lpszCAPemCertFileOrPath = nullptr)	= 0;
+
+	/*
+	* 名称：初始化通信组件 SSL 环境参数（通过内存加载证书）
+	* 描述：SSL 环境参数必须在 SSL 通信组件启动前完成初始化，否则启动失败
+	*		
+	* 参数：		iVerifyMode				-- SSL 验证模式（参考 EnSSLVerifyMode）
+	*			lpszPemCert				-- 证书内容
+	*			lpszPemKey				-- 私钥内容
+	*			lpszKeyPassword			-- 私钥密码（没有密码则为空）
+	*			lpszCAPemCert			-- CA 证书内容（单向验证或客户端可选）
+	*
+	* 返回值：	TRUE	-- 成功
+	*			FALSE	-- 失败，可通过 SYS_GetLastError() 获取失败原因
+	*/
+	virtual BOOL SetupSSLContextByMemory(int iVerifyMode = SSL_VM_NONE, LPCSTR lpszPemCert = nullptr, LPCSTR lpszPemKey = nullptr, LPCSTR lpszKeyPassword = nullptr, LPCSTR lpszCAPemCert = nullptr)					= 0;
 
 	/*
 	* 名称：清理通信组件 SSL 运行环境
@@ -477,7 +716,17 @@ public:
 	* 
 	* 返回值：无
 	*/
-	virtual void CleanupSSLContext	()																																													= 0;
+	virtual void CleanupSSLContext()						= 0;
+
+	/*
+	* 名称：启动 SSL 握手
+	* 描述：当通信组件设置为非自动握手时，需要调用本方法启动 SSL 握手
+	*		
+	* 返回值：	TRUE	-- 成功
+	*			FALSE	-- 失败，可通过 SYS_GetLastError() 获取失败原因
+	*/
+	virtual BOOL StartSSLHandShake(CONNID dwConnID)			= 0;
+
 #endif
 
 public:
@@ -485,16 +734,11 @@ public:
 	/***********************************************************************/
 	/***************************** 属性访问方法 *****************************/
 
-	/* 设置是否启用地址重用机制（默认：不启用） */
-	virtual void SetReuseAddress		(BOOL bReuseAddress)			= 0;
-	/* 检测是否启用地址重用机制 */
-	virtual BOOL IsReuseAddress			()								= 0;
-
 	/* 设置通信数据缓冲区大小（根据平均通信数据包大小调整设置，通常设置为 1024 的倍数） */
 	virtual void SetSocketBufferSize	(DWORD dwSocketBufferSize)		= 0;
-	/* 设置正常心跳包间隔（毫秒，0 则不发送心跳包，默认：30 * 1000） */
+	/* 设置正常心跳包间隔（毫秒，0 则不发送心跳包，默认：60 * 1000） */
 	virtual void SetKeepAliveTime		(DWORD dwKeepAliveTime)			= 0;
-	/* 设置异常心跳包间隔（毫秒，0 不发送心跳包，，默认：10 * 1000，如果超过若干次 [默认：WinXP 5 次, Win7 10 次] 检测不到心跳确认包则认为已断线） */
+	/* 设置异常心跳包间隔（毫秒，0 不发送心跳包，，默认：20 * 1000，如果超过若干次 [默认：WinXP 5 次, Win7 10 次] 检测不到心跳确认包则认为已断线） */
 	virtual void SetKeepAliveInterval	(DWORD dwKeepAliveInterval)		= 0;
 
 	/* 获取通信数据缓冲区大小 */
@@ -503,6 +747,28 @@ public:
 	virtual DWORD GetKeepAliveTime		()	= 0;
 	/* 获取异常心跳包间隔 */
 	virtual DWORD GetKeepAliveInterval	()	= 0;
+
+#ifdef _SSL_SUPPORT
+	/* 设置通信组件握手方式（默认：TRUE，自动握手） */
+	virtual void SetSSLAutoHandShake(BOOL bAutoHandShake)				= 0;
+	/* 获取通信组件握手方式 */
+	virtual BOOL IsSSLAutoHandShake()									= 0;
+
+	/* 设置 SSL 加密算法列表 */
+	virtual void SetSSLCipherList(LPCTSTR lpszCipherList)				= 0;
+	/* 获取 SSL 加密算法列表 */
+	virtual LPCTSTR GetSSLCipherList()									= 0;
+
+	/*
+	* 名称：获取 SSL Session 信息
+	* 描述：获取指定类型的 SSL Session 信息（输出类型参考：EnSSLSessionInfo）
+	*		
+	* 返回值：	TRUE	-- 成功
+	*			FALSE	-- 失败，可通过 SYS_GetLastError() 获取失败原因
+	*/
+	virtual BOOL GetSSLSessionInfo(CONNID dwConnID, EnSSLSessionInfo enInfo, LPVOID* lppInfo)	= 0;
+#endif
+
 };
 
 /************************************************************************
@@ -524,10 +790,11 @@ public:
 	*			usPort				-- 服务端端口
 	*			bAsyncConnect		-- 是否采用异步 Connect
 	*			lpszBindAddress		-- 绑定地址（默认：nullptr，TcpClient/UdpClient -> 不执行绑定操作，UdpCast 绑定 -> 任意地址）
+	*			usLocalPort			-- 本地端口（默认：0）
 	* 返回值：	TRUE	-- 成功
 	*			FALSE	-- 失败，可通过 GetLastError() 获取错误代码
 	*/
-	virtual BOOL Start	(LPCTSTR lpszRemoteAddress, USHORT usPort, BOOL bAsyncConnect = TRUE, LPCTSTR lpszBindAddress = nullptr)	= 0;
+	virtual BOOL Start	(LPCTSTR lpszRemoteAddress, USHORT usPort, BOOL bAsyncConnect = TRUE, LPCTSTR lpszBindAddress = nullptr, USHORT usLocalPort = 0)	= 0;
 
 	/*
 	* 名称：关闭通信组件
@@ -547,7 +814,7 @@ public:
 	*			iLength		-- 发送缓冲区长度
 	*			iOffset		-- 发送缓冲区指针偏移量
 	* 返回值：	TRUE	-- 成功
-	*			FALSE	-- 失败，可通过 Windows API 函数 ::GetLastError() 获取 Windows 错误代码
+	*			FALSE	-- 失败，可通过 SYS_GetLastError() 获取错误代码
 	*/
 	virtual BOOL Send	(const BYTE* pBuffer, int iLength, int iOffset = 0)						= 0;
 
@@ -560,7 +827,7 @@ public:
 	* 参数：		pBuffers	-- 发送缓冲区数组
 	*			iCount		-- 发送缓冲区数目
 	* 返回值：	TRUE	-- 成功
-	*			FALSE	-- 失败，可通过 Windows API 函数 ::GetLastError() 获取 Windows 错误代码
+	*			FALSE	-- 失败，可通过 SYS_GetLastError() 获取错误代码
 	*/
 	virtual BOOL SendPackets(const WSABUF pBuffers[], int iCount)								= 0;
 
@@ -573,6 +840,16 @@ public:
 	*			FALSE	-- 失败
 	*/
 	virtual BOOL PauseReceive(BOOL bPause = TRUE)												= 0;
+
+	/*
+	* 名称：等待
+	* 描述：等待通信组件停止运行
+	*		
+	* 参数：		dwMilliseconds	-- 超时时间（毫秒，默认：-1，永不超时）
+	* 返回值：	TRUE	-- 成功
+	*			FALSE	-- 失败，可通过 SYS_GetLastError() 获取错误代码
+	*/
+	virtual BOOL Wait(DWORD dwMilliseconds = INFINITE)											= 0;
 
 public:
 
@@ -605,12 +882,18 @@ public:
 	virtual BOOL GetPendingDataLength	(int& iPending)											= 0;
 	/* 获取连接的数据接收状态 */
 	virtual BOOL IsPauseReceive			(BOOL& bPaused)											= 0;
+	/* 检测是否有效连接 */
+	virtual BOOL IsConnected			()														= 0;
 
+	/* 设置地址重用选项 */
+	virtual void SetReuseAddressPolicy(EnReuseAddressPolicy enReusePolicy)						= 0;
 	/* 设置内存块缓存池大小（通常设置为 -> PUSH 模型：5 - 10；PULL 模型：10 - 20 ） */
 	virtual void SetFreeBufferPoolSize		(DWORD dwFreeBufferPoolSize)						= 0;
 	/* 设置内存块缓存池回收阀值（通常设置为内存块缓存池大小的 3 倍） */
 	virtual void SetFreeBufferPoolHold		(DWORD dwFreeBufferPoolHold)						= 0;
 
+	/* 获取地址重用选项 */
+	virtual EnReuseAddressPolicy GetReuseAddressPolicy() = 0;
 	/* 获取内存块缓存池大小 */
 	virtual DWORD GetFreeBufferPoolSize		()													= 0;
 	/* 获取内存块缓存池回收阀值 */
@@ -639,9 +922,9 @@ public:
 	*			pHead			-- 头部附加数据
 	*			pTail			-- 尾部附加数据
 	* 返回值：	TRUE	-- 成功
-	*			FALSE	-- 失败，可通过 Windows API 函数 ::GetLastError() 获取 Windows 错误代码
+	*			FALSE	-- 失败，可通过 SYS_GetLastError() 获取错误代码
 	*/
-	virtual BOOL SendSmallFile		(LPCTSTR lpszFileName, const LPWSABUF pHead = nullptr, const LPWSABUF pTail = nullptr)	= 0;
+	virtual BOOL SendSmallFile(LPCTSTR lpszFileName, const LPWSABUF pHead = nullptr, const LPWSABUF pTail = nullptr)	= 0;
 
 #ifdef _SSL_SUPPORT
 	/*
@@ -651,13 +934,28 @@ public:
 	* 参数：		iVerifyMode				-- SSL 验证模式（参考 EnSSLVerifyMode）
 	*			lpszPemCertFile			-- 证书文件（客户端可选）
 	*			lpszPemKeyFile			-- 私钥文件（客户端可选）
-	*			lpszKeyPasswod			-- 私钥密码（没有密码则为空）
+	*			lpszKeyPassword			-- 私钥密码（没有密码则为空）
 	*			lpszCAPemCertFileOrPath	-- CA 证书文件或目录（单向验证或客户端可选）
 	*
 	* 返回值：	TRUE	-- 成功
 	*			FALSE	-- 失败，可通过 SYS_GetLastError() 获取失败原因
 	*/
-	virtual BOOL SetupSSLContext	(int iVerifyMode = SSL_VM_NONE, LPCTSTR lpszPemCertFile = nullptr, LPCTSTR lpszPemKeyFile = nullptr, LPCTSTR lpszKeyPasswod = nullptr, LPCTSTR lpszCAPemCertFileOrPath = nullptr)	= 0;
+	virtual BOOL SetupSSLContext(int iVerifyMode = SSL_VM_NONE, LPCTSTR lpszPemCertFile = nullptr, LPCTSTR lpszPemKeyFile = nullptr, LPCTSTR lpszKeyPassword = nullptr, LPCTSTR lpszCAPemCertFileOrPath = nullptr)	= 0;
+
+	/*
+	* 名称：初始化通信组件 SSL 环境参数（通过内存加载证书）
+	* 描述：SSL 环境参数必须在 SSL 通信组件启动前完成初始化，否则启动失败
+	*		
+	* 参数：		iVerifyMode				-- SSL 验证模式（参考 EnSSLVerifyMode）
+	*			lpszPemCert				-- 证书内容
+	*			lpszPemKey				-- 私钥内容
+	*			lpszKeyPassword			-- 私钥密码（没有密码则为空）
+	*			lpszCAPemCert			-- CA 证书内容（单向验证或客户端可选）
+	*
+	* 返回值：	TRUE	-- 成功
+	*			FALSE	-- 失败，可通过 SYS_GetLastError() 获取失败原因
+	*/
+	virtual BOOL SetupSSLContextByMemory(int iVerifyMode = SSL_VM_NONE, LPCSTR lpszPemCert = nullptr, LPCSTR lpszPemKey = nullptr, LPCSTR lpszKeyPassword = nullptr, LPCSTR lpszCAPemCert = nullptr)					= 0;
 
 	/*
 	* 名称：清理通信组件 SSL 运行环境
@@ -669,7 +967,17 @@ public:
 	* 
 	* 返回值：无
 	*/
-	virtual void CleanupSSLContext	()																																													= 0;
+	virtual void CleanupSSLContext()	= 0;
+
+	/*
+	* 名称：启动 SSL 握手
+	* 描述：当通信组件设置为非自动握手时，需要调用本方法启动 SSL 握手
+	*		
+	* 返回值：	TRUE	-- 成功
+	*			FALSE	-- 失败，可通过 SYS_GetLastError() 获取失败原因
+	*/
+	virtual BOOL StartSSLHandShake()	= 0;
+
 #endif
 
 public:
@@ -679,9 +987,9 @@ public:
 
 	/* 设置通信数据缓冲区大小（根据平均通信数据包大小调整设置，通常设置为：(N * 1024) - sizeof(TBufferObj)） */
 	virtual void SetSocketBufferSize	(DWORD dwSocketBufferSize)	= 0;
-	/* 设置正常心跳包间隔（毫秒，0 则不发送心跳包，默认：30 * 1000） */
+	/* 设置正常心跳包间隔（毫秒，0 则不发送心跳包，默认：60 * 1000） */
 	virtual void SetKeepAliveTime		(DWORD dwKeepAliveTime)		= 0;
-	/* 设置异常心跳包间隔（毫秒，0 不发送心跳包，，默认：10 * 1000，如果超过若干次 [默认：WinXP 5 次, Win7 10 次] 检测不到心跳确认包则认为已断线） */
+	/* 设置异常心跳包间隔（毫秒，0 不发送心跳包，，默认：20 * 1000，如果超过若干次 [默认：WinXP 5 次, Win7 10 次] 检测不到心跳确认包则认为已断线） */
 	virtual void SetKeepAliveInterval	(DWORD dwKeepAliveInterval)	= 0;
 
 	/* 获取通信数据缓冲区大小 */
@@ -690,7 +998,31 @@ public:
 	virtual DWORD GetKeepAliveTime		()	= 0;
 	/* 获取异常心跳包间隔 */
 	virtual DWORD GetKeepAliveInterval	()	= 0;
+
+#ifdef _SSL_SUPPORT
+	/* 设置通信组件握手方式（默认：TRUE，自动握手） */
+	virtual void SetSSLAutoHandShake(BOOL bAutoHandShake)	= 0;
+	/* 获取通信组件握手方式 */
+	virtual BOOL IsSSLAutoHandShake()						= 0;
+
+	/* 设置 SSL 加密算法列表 */
+	virtual void SetSSLCipherList(LPCTSTR lpszCipherList)	= 0;
+	/* 获取 SSL 加密算法列表 */
+	virtual LPCTSTR GetSSLCipherList()						= 0;
+
+	/*
+	* 名称：获取 SSL Session 信息
+	* 描述：获取指定类型的 SSL Session 信息（输出类型参考：EnSSLSessionInfo）
+	*		
+	* 返回值：	TRUE	-- 成功
+	*			FALSE	-- 失败，可通过 SYS_GetLastError() 获取失败原因
+	*/
+	virtual BOOL GetSSLSessionInfo(EnSSLSessionInfo enInfo, LPVOID* lppInfo)	= 0;
+#endif
+
 };
+
+#ifdef _UDP_SUPPORT
 
 /************************************************************************
 名称：UDP 通信客户端组件接口
@@ -715,7 +1047,7 @@ public:
 
 	/* 设置监测包尝试次数（0 则不发送监测跳包，如果超过最大尝试次数则认为已断线） */
 	virtual void SetDetectAttempts	(DWORD dwDetectAttempts)	= 0;
-	/* 设置监测包发送间隔（秒，0 不发送监测包） */
+	/* 设置监测包发送间隔（毫秒，0 不发送监测包） */
 	virtual void SetDetectInterval	(DWORD dwDetectInterval)	= 0;
 	/* 获取心跳检查次数 */
 	virtual DWORD GetDetectAttempts	()							= 0;
@@ -744,11 +1076,6 @@ public:
 	/* 获取数据报文最大长度 */
 	virtual DWORD GetMaxDatagramSize()								= 0;
 
-	/* 设置是否启用地址重用机制（默认：不启用） */
-	virtual void SetReuseAddress	(BOOL bReuseAddress)			= 0;
-	/* 检测是否启用地址重用机制 */
-	virtual BOOL IsReuseAddress		()								= 0;
-
 	/* 设置传播模式（组播或广播） */
 	virtual void SetCastMode		(EnCastMode enCastMode)			= 0;
 	/* 获取传播模式 */
@@ -769,52 +1096,244 @@ public:
 };
 
 /************************************************************************
-名称：双接口模版类
-描述：定义双接口转换方法
+名称：UDP 节点组件接口
+描述：定义 UDP 节点组件的所有操作方法和属性访问方法
 ************************************************************************/
-template<class F, class S> class DualInterface : public F, public S
+class IUdpNode
 {
 public:
 
-	/* this 转换为 F* */
-	inline static F* ToF(DualInterface* pThis)
-	{
-		return (F*)(pThis);
-	}
+	/***********************************************************************/
+	/***************************** 组件操作方法 *****************************/
 
-	/* F* 转换为 this */
-	inline static DualInterface* FromF(F* pF)
-	{
-		return (DualInterface*)(pF);
-	}
+	/*
+	* 名称：启动通信组件
+	* 描述：启动 UDP 节点通信组件，启动完成后可开始收发数据
+	*		
+	* 参数：		lpszBindAddress		-- 绑定地址（默认：nullptr，绑定任意地址）
+	*			usPort				-- 本地端口（默认：0）
+	*			enCastMode			-- 传播模式（默认：CM_UNICAST）
+	*			lpszCastAddress		-- 传播地址（默认：nullptr，当 enCaseMode 为 CM_MULTICAST 或 CM_BROADCAST 时有效）
+	* 返回值：	TRUE	-- 成功
+	*			FALSE	-- 失败，可通过 GetLastError() 获取错误代码
+	*/
+	virtual BOOL Start(LPCTSTR lpszBindAddress = nullptr, USHORT usPort = 0, EnCastMode enCastMode = CM_UNICAST, LPCTSTR lpszCastAddress = nullptr)	= 0;
 
-	/* this 转换为 S* */
-	inline static S* ToS(DualInterface* pThis)
-	{
-		return (S*)(F2S(ToF(pThis)));
-	}
+	/*
+	* 名称：关闭通信组件
+	* 描述：关闭 UDP 节点通信组件，关闭完成后释放所有资源
+	*		
+	* 参数：	
+	* 返回值：	TRUE	-- 成功
+	*			FALSE	-- 失败，可通过 GetLastError() 获取错误代码
+	*/
+	virtual BOOL Stop()																										= 0;
 
-	/* S* 转换为 this */
-	inline static DualInterface* FromS(S* pS)
-	{
-		return FromF(S2F(pS));
-	}
+	/*
+	* 名称：发送数据
+	* 描述：向指定地址发送数据
+	*		
+	* 参数：		lpszRemoteAddress	-- 远程地址
+	*			usRemotePort		-- 远程端口
+	*			pBuffer				-- 发送缓冲区
+	*			iLength				-- 发送缓冲区长度
+	*			iOffset				-- 发送缓冲区指针偏移量
+	* 返回值：	TRUE	-- 成功
+	*			FALSE	-- 失败，可通过 SYS_GetLastError() 获取错误代码
+	*/
+	virtual BOOL Send(LPCTSTR lpszRemoteAddress, USHORT usRemotePort, const BYTE* pBuffer, int iLength, int iOffset = 0)	= 0;
 
-	/* S* 转换为 F* */
-	inline static F* S2F(S* pS)
-	{
-		return (F*)((char*)pS - sizeof(F));
-	}
+	/*
+	* 名称：发送多组数据
+	* 描述：向指定地址发送多组数据，把所有数据包组合成一个数据包发送（数据包的总长度不能大于设置的 UDP 包最大长度） 
+	*		
+	* 参数：		lpszRemoteAddress	-- 远程地址
+	*			usRemotePort		-- 远程端口
+	*			pBuffers			-- 发送缓冲区数组
+	*			iCount				-- 发送缓冲区数目
+	* 返回值：	TRUE	-- 成功
+	*			FALSE	-- 失败，可通过 SYS_GetLastError() 获取错误代码
+	*/
+	virtual BOOL SendPackets(LPCTSTR lpszRemoteAddress, USHORT usRemotePort, const WSABUF pBuffers[], int iCount)			= 0;
 
-	/* F* 转换为 S* */
-	inline static S* F2S(F* pF)
-	{
-		return (S*)((char*)pF + sizeof(F));
-	}
+	/*
+	* 名称：发送数据
+	* 描述：向传播地址发送数据
+	*		
+	* 参数：		pBuffer		-- 发送缓冲区
+	*			iLength		-- 发送缓冲区长度
+	*			iOffset		-- 发送缓冲区指针偏移量
+	* 返回值：	TRUE	-- 成功
+	*			FALSE	-- 失败，可通过 SYS_GetLastError() 获取错误代码
+	*/
+	virtual BOOL SendCast(const BYTE* pBuffer, int iLength, int iOffset = 0)												= 0;
+
+	/*
+	* 名称：发送多组数据
+	* 描述：向传播地址发送多组数据，把所有数据包组合成一个数据包发送（数据包的总长度不能大于设置的 UDP 包最大长度） 
+	*		
+	* 参数：		pBuffers	-- 发送缓冲区数组
+	*			iCount		-- 发送缓冲区数目
+	* 返回值：	TRUE	-- 成功
+	*			FALSE	-- 失败，可通过 SYS_GetLastError() 获取错误代码
+	*/
+	virtual BOOL SendCastPackets(const WSABUF pBuffers[], int iCount)														= 0;
+
+	/*
+	* 名称：等待
+	* 描述：等待通信组件停止运行
+	*		
+	* 参数：		dwMilliseconds	-- 超时时间（毫秒，默认：-1，永不超时）
+	* 返回值：	TRUE	-- 成功
+	*			FALSE	-- 失败，可通过 SYS_GetLastError() 获取错误代码
+	*/
+	virtual BOOL Wait(DWORD dwMilliseconds = INFINITE)																		= 0;
 
 public:
-	~DualInterface() = default;
+
+	/***********************************************************************/
+	/***************************** 属性访问方法 *****************************/
+
+	/* 设置附加数据 */
+	virtual void SetExtra					(PVOID pExtra)										= 0;
+
+	/* 获取附加数据 */
+	virtual PVOID GetExtra					()													= 0;
+
+	/* 检查通信组件是否已启动 */
+	virtual BOOL HasStarted					()													= 0;
+	/* 查看通信组件当前状态 */
+	virtual EnServiceState GetState			()													= 0;
+	/* 获取最近一次失败操作的错误代码 */
+	virtual EnSocketError GetLastError		()													= 0;
+	/* 获取最近一次失败操作的错误描述 */
+	virtual LPCTSTR GetLastErrorDesc		()													= 0;
+	/* 获取本节点地址 */
+	virtual BOOL GetLocalAddress		(TCHAR lpszAddress[], int& iAddressLen, USHORT& usPort)	= 0;
+	/* 获取本节点传播地址 */
+	virtual BOOL GetCastAddress			(TCHAR lpszAddress[], int& iAddressLen, USHORT& usPort)	= 0;
+	/* 获取传播模式 */
+	virtual EnCastMode GetCastMode		()														= 0;
+	/* 获取未发出数据的长度 */
+	virtual BOOL GetPendingDataLength	(int& iPending)											= 0;
+
+	/* 设置数据报文最大长度（建议在局域网环境下不超过 1432 字节，在广域网环境下不超过 548 字节） */
+	virtual void SetMaxDatagramSize	(DWORD dwMaxDatagramSize)	= 0;
+	/* 获取数据报文最大长度 */
+	virtual DWORD GetMaxDatagramSize()							= 0;
+
+	/* 设置组播报文的 TTL（0 - 255） */
+	virtual void SetMultiCastTtl	(int iMCTtl)				= 0;
+	/* 获取组播报文的 TTL */
+	virtual int GetMultiCastTtl		()							= 0;
+
+	/* 设置是否启用组播环路（TRUE or FALSE） */
+	virtual void SetMultiCastLoop	(BOOL bMCLoop)				= 0;
+	/* 检测是否启用组播环路 */
+	virtual BOOL IsMultiCastLoop	()							= 0;
+
+	/* 设置地址重用选项 */
+	virtual void SetReuseAddressPolicy(EnReuseAddressPolicy enReusePolicy)	= 0;
+	/* 设置工作线程数量（通常设置为 2 * CPU + 2） */
+	virtual void SetWorkerThreadCount	(DWORD dwWorkerThreadCount)			= 0;
+	/* 设置 Receive 预投递数量（根据负载调整设置，Receive 预投递数量越大则丢包概率越小） */
+	virtual void SetPostReceiveCount	(DWORD dwPostReceiveCount)			= 0;
+	/* 设置内存块缓存池大小 */
+	virtual void SetFreeBufferPoolSize	(DWORD dwFreeBufferPoolSize)		= 0;
+	/* 设置内存块缓存池回收阀值 */
+	virtual void SetFreeBufferPoolHold	(DWORD dwFreeBufferPoolHold)		= 0;
+
+	/* 获取地址重用选项 */
+	virtual EnReuseAddressPolicy GetReuseAddressPolicy()					= 0;
+	/* 获取工作线程数量 */
+	virtual DWORD GetWorkerThreadCount	()									= 0;
+	/* 获取 Receive 预投递数量 */
+	virtual DWORD GetPostReceiveCount	()									= 0;
+	/* 获取内存块缓存池大小 */
+	virtual DWORD GetFreeBufferPoolSize	()									= 0;
+	/* 获取内存块缓存池回收阀值 */	
+	virtual DWORD GetFreeBufferPoolHold	()									= 0;
+
+public:
+	virtual ~IUdpNode() = default;
 };
+
+/************************************************************************
+名称：Client ARQ 模型组件接口
+描述：定义 Client 组件的 ARQ 模型组件的所有操作方法
+************************************************************************/
+class IArqClient
+{
+public:
+
+	/***********************************************************************/
+	/***************************** 组件操作方法 *****************************/
+
+public:
+
+	/***********************************************************************/
+	/***************************** 属性访问方法 *****************************/
+
+	/* 设置是否开启 nodelay 模式（默认：FALSE，不开启） */
+	virtual void SetNoDelay				(BOOL bNoDelay)				= 0;
+	/* 设置是否关闭拥塞控制（默认：FALSE，不关闭） */
+	virtual void SetTurnoffCongestCtrl	(BOOL bTurnOff)				= 0;
+	/* 设置数据刷新间隔（毫秒，默认：60） */
+	virtual void SetFlushInterval		(DWORD dwFlushInterval)		= 0;
+	/* 设置快速重传 ACK 跨越次数（默认：0，关闭快速重传） */
+	virtual void SetResendByAcks		(DWORD dwResendByAcks)		= 0;
+	/* 设置发送窗口大小（数据包数量，默认：128） */
+	virtual void SetSendWndSize			(DWORD dwSendWndSize)		= 0;
+	/* 设置接收窗口大小（数据包数量，默认：512） */
+	virtual void SetRecvWndSize			(DWORD dwRecvWndSize)		= 0;
+	/* 设置最小重传超时时间（毫秒，默认：30） */
+	virtual void SetMinRto				(DWORD dwMinRto)			= 0;
+	/* 设置快速握手次数限制（默认：5，如果为 0 则不限制） */
+	virtual void SetFastLimit			(DWORD dwFastLimit)			= 0;
+	/* 设置最大传输单元（默认：0，与 SetMaxDatagramSize() 一致） */
+	virtual void SetMaxTransUnit		(DWORD dwMaxTransUnit)		= 0;
+	/* 设置最大数据包大小（默认：4096） */
+	virtual void SetMaxMessageSize		(DWORD dwMaxMessageSize)	= 0;
+	/* 设置握手超时时间（毫秒，默认：5000） */
+	virtual void SetHandShakeTimeout	(DWORD dwHandShakeTimeout)	= 0;
+
+	/* 检测是否开启 nodelay 模式 */
+	virtual BOOL IsNoDelay				()							= 0;
+	/* 检测是否关闭拥塞控制 */
+	virtual BOOL IsTurnoffCongestCtrl	()							= 0;
+	/* 获取数据刷新间隔 */
+	virtual DWORD GetFlushInterval		()							= 0;
+	/* 获取快速重传 ACK 跨越次数 */
+	virtual DWORD GetResendByAcks		()							= 0;
+	/* 获取发送窗口大小 */
+	virtual DWORD GetSendWndSize		()							= 0;
+	/* 获取接收窗口大小 */
+	virtual DWORD GetRecvWndSize		()							= 0;
+	/* 获取最小重传超时时间 */
+	virtual DWORD GetMinRto				()							= 0;
+	/* 获取快速握手次数限制 */
+	virtual DWORD GetFastLimit			()							= 0;
+	/* 获取最大传输单元 */
+	virtual DWORD GetMaxTransUnit		()							= 0;
+	/* 获取最大数据包大小 */
+	virtual DWORD GetMaxMessageSize		()							= 0;
+	/* 获取握手超时时间 */
+	virtual DWORD GetHandShakeTimeout	()							= 0;
+
+	/* 获取等待发送包数量 */
+	virtual BOOL GetWaitingSendMessageCount	(int& iCount)			= 0;
+
+public:
+	virtual ~IArqClient() = default;
+};
+
+/************************************************************************
+名称：UDP ARQ 通信客户端组件接口
+描述：继承了 ARQ 和 Client 接口
+************************************************************************/
+typedef	DualInterface<IArqClient, IUdpClient>	IUdpArqClient;
+
+#endif
 
 /************************************************************************
 名称：Server/Agent PULL 模型组件接口
@@ -1107,6 +1626,8 @@ public:
 	virtual EnHandleResult OnReceive(ITcpServer* pSender, CONNID dwConnID, const BYTE* pData, int iLength)	override {return HR_IGNORE;}
 };
 
+#ifdef _UDP_SUPPORT
+
 /************************************************************************
 名称：UDP 服务端 Socket 监听器接口
 描述：定义 UDP 服务端 Socket 监听器的所有事件
@@ -1131,6 +1652,8 @@ public:
 	virtual EnHandleResult OnSend(IUdpServer* pSender, CONNID dwConnID, const BYTE* pData, int iLength)	override {return HR_IGNORE;}
 	virtual EnHandleResult OnShutdown(IUdpServer* pSender)												override {return HR_IGNORE;}
 };
+
+#endif
 
 /************************************************************************
 名称：通信代理 Socket 监听器接口
@@ -1272,6 +1795,8 @@ public:
 	virtual EnHandleResult OnReceive(ITcpClient* pSender, CONNID dwConnID, const BYTE* pData, int iLength)	{return HR_IGNORE;}
 };
 
+#ifdef _UDP_SUPPORT
+
 /************************************************************************
 名称：UDP 客户端 Socket 监听器接口
 描述：定义 UDP 客户端 Socket 监听器的所有事件
@@ -1320,6 +1845,94 @@ public:
 	virtual EnHandleResult OnSend(IUdpCast* pSender, CONNID dwConnID, const BYTE* pData, int iLength)		override {return HR_IGNORE;}
 };
 
+/************************************************************************
+名称：UDP 节点 Socket 监听器接口
+描述：定义 UDP 节点 Socket 监听器的所有事件
+************************************************************************/
+class IUdpNodeListener
+{
+public:
+
+	/*
+	* 名称：准备监听通知
+	* 描述：通信组件启动时，在监听 Socket 创建完成并开始执行监听前，Socket 监听器
+	*		将收到该通知，监听器可以在通知处理方法中执行 Socket 选项设置等额外工作
+	*		
+	* 参数：		pSender		-- 事件源对象
+	*			soListen	-- 监听 Socket
+	* 返回值：	HR_OK / HR_IGNORE	-- 继续执行
+	*			HR_ERROR			-- 终止启动通信服务组件
+	*/
+	virtual EnHandleResult OnPrepareListen(IUdpNode* pSender, SOCKET soListen)															= 0;
+
+	/*
+	* 名称：已发送数据通知
+	* 描述：成功发送数据后，Socket 监听器将收到该通知
+	*		
+	* 参数：		pSender				-- 事件源对象
+	*			lpszRemoteAddress	-- 远程地址
+	*			usRemotePort		-- 远程端口
+	*			pData				-- 已发送数据缓冲区
+	*			iLength				-- 已发送数据长度
+	* 返回值：	忽略返回值
+	*/
+	virtual EnHandleResult OnSend(IUdpNode* pSender, LPCTSTR lpszRemoteAddress, USHORT usRemotePort, const BYTE* pData, int iLength)	= 0;
+
+	/*
+	* 名称：数据到达通知（PUSH 模型）
+	* 描述：成功接收数据后，Socket 监听器将收到该通知
+	*		
+	* 参数：		pSender				-- 事件源对象
+	*			lpszRemoteAddress	-- 远程地址
+	*			usRemotePort		-- 远程端口
+	*			pData				-- 已发送数据缓冲区
+	*			iLength				-- 已发送数据长度
+	* 返回值：	忽略返回值
+	*/
+	virtual EnHandleResult OnReceive(IUdpNode* pSender, LPCTSTR lpszRemoteAddress, USHORT usRemotePort, const BYTE* pData, int iLength)	= 0;
+
+	/*
+	* 名称：通信错误通知
+	* 描述：通信发生错误后，Socket 监听器将收到该通知
+	*		
+	* 参数：		pSender				-- 事件源对象
+	*			lpszRemoteAddress	-- 远程地址
+	*			usRemotePort		-- 远程端口
+	*			enOperation			-- Socket 操作类型
+	*			iErrorCode			-- 错误代码
+	*			pData				-- 本次事件关联的数据缓冲区
+	*			iLength				-- 本次事件关联的数据长度
+	* 返回值：	忽略返回值
+	*/
+	virtual EnHandleResult OnError(IUdpNode* pSender, EnSocketOperation enOperation, int iErrorCode, LPCTSTR lpszRemoteAddress, USHORT usRemotePort, const BYTE* pData, int iLength)	= 0;
+
+	/*
+	* 名称：关闭通信组件通知
+	* 描述：通信组件关闭时，Socket 监听器将收到该通知
+	*		
+	* 参数：		pSender		-- 事件源对象
+	* 返回值：	忽略返回值
+	*/
+	virtual EnHandleResult OnShutdown(IUdpNode* pSender)																				= 0;
+
+public:
+	virtual ~IUdpNodeListener() = default;
+};
+
+/************************************************************************
+名称：UDP 节点 Socket 监听器抽象基类
+描述：定义某些事件的默认处理方法（忽略事件）
+************************************************************************/
+class CUdpNodeListener : public IUdpNodeListener
+{
+public:
+	virtual EnHandleResult OnPrepareListen(IUdpNode* pSender, SOCKET soListen)															override {return HR_IGNORE;}
+	virtual EnHandleResult OnSend(IUdpNode* pSender, LPCTSTR lpszRemoteAddress, USHORT usRemotePort, const BYTE* pData, int iLength)	override {return HR_IGNORE;}
+	virtual EnHandleResult OnShutdown(IUdpNode* pSender)																				override {return HR_IGNORE;}
+};
+
+#endif
+
 /*****************************************************************************************************************************************************/
 /****************************************************************** HTTP Interfaces ******************************************************************/
 /*****************************************************************************************************************************************************/
@@ -1338,25 +1951,26 @@ public:
 	/***************************** 组件操作方法 *****************************/
 
 	/*
-	* 名称：发送 WebSocket 消息
-	* 描述：向对端端发送 WebSocket 消息
+	* 名称：启动 HTTP 通信
+	* 描述：当通信组件设置为非自动启动 HTTP 通信时，需要调用本方法启动 HTTP 通信
+	*		
+	* 返回值：	TRUE	-- 成功
+	*			FALSE	-- 失败，可通过 SYS_GetLastError() 获取失败原因
+	*/
+	virtual BOOL StartHttp(CONNID dwConnID)												= 0;
+
+	/*
+	* 名称：发送 Chunked 数据分片
+	* 描述：向对端发送 Chunked 数据分片
 	*		
 	* 参数：		dwConnID		-- 连接 ID
-	*			bFinal			-- 是否结束帧
-	*			iReserved		-- RSV1/RSV2/RSV3 各 1 位
-	*			iOperationCode	-- 操作码：0x0 - 0xF
-	*			lpszMask		-- 掩码（nullptr 或 4 字节掩码，如果为 nullptr 则没有掩码）
-	*			pData			-- 消息体数据缓冲区
-	*			iLength			-- 消息体数据长度
-	*			ullBodyLen		-- 消息总长度
-	* 								ullBodyLen = 0		 -> 消息总长度为 iLength
-	* 								ullBodyLen = iLength -> 消息总长度为 ullBodyLen
-	* 								ullBodyLen > iLength -> 消息总长度为 ullBodyLen，后续消息体长度为 ullBOdyLen - iLength，后续消息体通过底层方法 Send() / SendPackets() 发送
-	* 								ullBodyLen < iLength -> 错误参数，发送失败
+	*			pData			-- Chunked 数据分片
+	*			iLength			-- 数据分片长度（为 0 表示结束分片）
+	*			lpszExtensions	-- 扩展属性（默认：nullptr）
 	* 返回值：	TRUE			-- 成功
 	*			FALSE			-- 失败
 	*/
-	virtual BOOL SendWSMessage(CONNID dwConnID, BOOL bFinal, BYTE iReserved, BYTE iOperationCode, const BYTE lpszMask[4] = nullptr, BYTE* pData = nullptr, int iLength = 0, ULONGLONG ullBodyLen = 0)	= 0;
+	virtual BOOL SendChunkData(CONNID dwConnID, const BYTE* pData = nullptr, int iLength = 0, LPCSTR lpszExtensions = nullptr)	= 0;
 
 public:
 
@@ -1413,6 +2027,11 @@ public:
 	/* 获取当前 WebSocket 消息状态，传入 nullptr 则不获取相应字段 */
 	virtual BOOL GetWSMessageState(CONNID dwConnID, BOOL* lpbFinal, BYTE* lpiReserved, BYTE* lpiOperationCode, LPCBYTE* lpszMask, ULONGLONG* lpullBodyLen, ULONGLONG* lpullBodyRemain)	= 0;
 
+	/* 设置 HTTP 启动方式（默认：TRUE，自动启动） */
+	virtual void SetHttpAutoStart(BOOL bAutoStart)													= 0;
+	/* 获取 HTTP 启动方式 */
+	virtual BOOL IsHttpAutoStart()																	= 0;
+
 public:
 	virtual ~IComplexHttp() = default;
 };
@@ -1427,6 +2046,27 @@ public:
 
 	/***********************************************************************/
 	/***************************** 组件操作方法 *****************************/
+
+	/*
+	* 名称：发送 WebSocket 消息
+	* 描述：向对端端发送 WebSocket 消息
+	*		
+	* 参数：		dwConnID		-- 连接 ID
+	*			bFinal			-- 是否结束帧
+	*			iReserved		-- RSV1/RSV2/RSV3 各 1 位
+	*			iOperationCode	-- 操作码：0x0 - 0xF
+	*			lpszMask		-- 掩码（nullptr 或 4 字节掩码，如果为 nullptr 则没有掩码）
+	*			pData			-- 消息体数据缓冲区
+	*			iLength			-- 消息体数据长度
+	*			ullBodyLen		-- 消息总长度
+	* 								ullBodyLen = 0		 -> 消息总长度为 iLength
+	* 								ullBodyLen = iLength -> 消息总长度为 ullBodyLen
+	* 								ullBodyLen > iLength -> 消息总长度为 ullBodyLen，后续消息体长度为 ullBOdyLen - iLength，后续消息体通过底层方法 Send() / SendPackets() 发送
+	* 								ullBodyLen < iLength -> 错误参数，发送失败
+	* 返回值：	TRUE			-- 成功
+	*			FALSE			-- 失败
+	*/
+	virtual BOOL SendWSMessage(CONNID dwConnID, BOOL bFinal, BYTE iReserved, BYTE iOperationCode, const BYTE lpszMask[4], const BYTE* pData = nullptr, int iLength = 0, ULONGLONG ullBodyLen = 0)	= 0;
 
 	/*
 	* 名称：发送请求
@@ -1502,6 +2142,26 @@ public:
 
 	/***********************************************************************/
 	/***************************** 组件操作方法 *****************************/
+
+	/*
+	* 名称：发送 WebSocket 消息
+	* 描述：向对端端发送 WebSocket 消息
+	*		
+	* 参数：		dwConnID		-- 连接 ID
+	*			bFinal			-- 是否结束帧
+	*			iReserved		-- RSV1/RSV2/RSV3 各 1 位
+	*			iOperationCode	-- 操作码：0x0 - 0xF
+	*			pData			-- 消息体数据缓冲区
+	*			iLength			-- 消息体数据长度
+	*			ullBodyLen		-- 消息总长度
+	* 								ullBodyLen = 0		 -> 消息总长度为 iLength
+	* 								ullBodyLen = iLength -> 消息总长度为 ullBodyLen
+	* 								ullBodyLen > iLength -> 消息总长度为 ullBodyLen，后续消息体长度为 ullBOdyLen - iLength，后续消息体通过底层方法 Send() / SendPackets() 发送
+	* 								ullBodyLen < iLength -> 错误参数，发送失败
+	* 返回值：	TRUE			-- 成功
+	*			FALSE			-- 失败
+	*/
+	virtual BOOL SendWSMessage(CONNID dwConnID, BOOL bFinal, BYTE iReserved, BYTE iOperationCode, const BYTE* pData, int iLength = 0, ULONGLONG ullBodyLen = 0)	= 0;
 
 	/*
 	* 名称：回复请求
@@ -1594,7 +2254,28 @@ public:
 	* 返回值：	TRUE			-- 成功
 	*			FALSE			-- 失败
 	*/
-	virtual BOOL SendWSMessage(BOOL bFinal, BYTE iReserved, BYTE iOperationCode, const BYTE lpszMask[4] = nullptr, BYTE* pData = nullptr, int iLength = 0, ULONGLONG ullBodyLen = 0)	= 0;
+	virtual BOOL SendWSMessage(BOOL bFinal, BYTE iReserved, BYTE iOperationCode, const BYTE lpszMask[4], const BYTE* pData = nullptr, int iLength = 0, ULONGLONG ullBodyLen = 0)	= 0;
+
+	/*
+	* 名称：启动 HTTP 通信
+	* 描述：当通信组件设置为非自动启动 HTTP 通信时，需要调用本方法启动 HTTP 通信
+	*		
+	* 返回值：	TRUE	-- 成功
+	*			FALSE	-- 失败，可通过 SYS_GetLastError() 获取失败原因
+	*/
+	virtual BOOL StartHttp()											= 0;
+
+	/*
+	* 名称：发送 Chunked 数据分片
+	* 描述：向对端发送 Chunked 数据分片
+	*		
+	* 参数：		pData			-- Chunked 数据分片
+	*			iLength			-- 数据分片长度（为 0 表示结束分片）
+	*			lpszExtensions	-- 扩展属性（默认：nullptr）
+	* 返回值：	TRUE			-- 成功
+	*			FALSE			-- 失败
+	*/
+	virtual BOOL SendChunkData(const BYTE* pData = nullptr, int iLength = 0, LPCSTR lpszExtensions = nullptr)	= 0;
 
 public:
 
@@ -1653,6 +2334,11 @@ public:
 
 	/* 获取当前 WebSocket 消息状态，传入 nullptr 则不获取相应字段 */
 	virtual BOOL GetWSMessageState(BOOL* lpbFinal, BYTE* lpiReserved, BYTE* lpiOperationCode, LPCBYTE* lpszMask, ULONGLONG* lpullBodyLen, ULONGLONG* lpullBodyRemain)	= 0;
+
+	/* 设置 HTTP 启动方式（默认：TRUE，自动启动） */
+	virtual void SetHttpAutoStart(BOOL bAutoStart)									= 0;
+	/* 获取 HTTP 启动方式 */
+	virtual BOOL IsHttpAutoStart()													= 0;
 
 public:
 	virtual ~IHttp() = default;
@@ -2114,3 +2800,120 @@ public:
 };
 
 #endif
+
+/*****************************************************************************************************************************************************/
+/************************************************************** Thread Pool Interfaces ***************************************************************/
+/*****************************************************************************************************************************************************/
+
+/************************************************************************
+名称：线程池组件接口
+描述：定义线程池组件的所有操作方法和属性访问方法
+************************************************************************/
+class IHPThreadPool
+{
+public:
+
+	/***********************************************************************/
+	/***************************** 组件操作方法 *****************************/
+
+	/*
+	* 名称：启动线程池组件
+	* 描述：
+	*		
+	* 参数：		dwThreadCount		-- 线程数量，（默认：0）
+	*									>0 -> dwThreadCount
+	*									=0 -> (CPU核数 * 2 + 2)
+	*									<0 -> (CPU核数 * (-dwThreadCount))
+	*			dwMaxQueueSize		-- 任务队列最大容量（默认：0，不限制）
+	*			enRejectedPolicy	-- 任务拒绝处理策略
+	*									TRP_CALL_FAIL（默认）	：立刻返回失败
+	*									TRP_WAIT_FOR			：等待（直到成功、超时或线程池关闭等原因导致失败）
+	*									TRP_CALLER_RUN			：调用者线程直接执行
+	*			dwStackSize			-- 线程堆栈空间大小（默认：0 -> 操作系统默认）
+	* 返回值：	TRUE	-- 成功
+	*			FALSE	-- 失败，可通过 SYS_GetLastError() 获取错误代码
+	*/
+	virtual BOOL Start	(DWORD dwThreadCount = 0, DWORD dwMaxQueueSize = 0, EnRejectedPolicy enRejectedPolicy = TRP_CALL_FAIL, DWORD dwStackSize = 0)	= 0;
+
+	/*
+	* 名称：关闭线程池组件
+	* 描述：在规定时间内关闭线程池组件，如果工作线程在最大等待时间内未能正常关闭，会尝试强制关闭，这种情况下很可能会造成系统资源泄漏
+	*		
+	* 参数：		dwMaxWait	-- 最大等待时间（毫秒，默认：INFINITE，一直等待）
+	* 返回值：	TRUE	-- 成功
+	*			FALSE	-- 失败，可通过 SYS_GetLastError() 获取错误代码
+	*/
+	virtual BOOL Stop	(DWORD dwMaxWait = INFINITE)										= 0;
+
+	/*
+	* 名称：提交任务
+	* 描述：向线程池提交异步任务
+	*		
+	* 参数：		fnTaskProc	-- 任务处理函数
+	*			pvArg		-- 任务参数
+	*			dwMaxWait	-- 任务提交最大等待时间（仅对 TRP_WAIT_FOR 类型线程池生效，默认：INFINITE，一直等待）
+	* 返回值：	TRUE	-- 成功
+	*			FALSE	-- 失败，可通过 SYS_GetLastError() 获取错误代码
+	*							其中，错误码 ERROR_DESTINATION_ELEMENT_FULL 表示任务队列已满
+	*/
+	virtual BOOL Submit	(Fn_TaskProc fnTaskProc, PVOID pvArg, DWORD dwMaxWait = INFINITE)	= 0;
+
+	/*
+	* 名称：提交 Socket 任务
+	* 描述：向线程池提交异步 Socket 任务
+	*		
+	* 参数：		pTask		-- 任务参数
+	*			dwMaxWait	-- 任务提交最大等待时间（仅对 TRP_WAIT_FOR 类型线程池生效，默认：INFINITE，一直等待）
+	* 返回值：	TRUE	-- 成功
+	*			FALSE	-- 失败，可通过 SYS_GetLastError() 获取错误代码
+	*							其中，错误码 ERROR_DESTINATION_ELEMENT_FULL 表示任务队列已满
+	*							注意：如果提交失败，需要手工调用 Destroy_HP_SocketTaskObj() 销毁 TSocketTask 对象
+	*/
+	virtual BOOL Submit	(LPTSocketTask pTask, DWORD dwMaxWait = INFINITE)					= 0;
+
+	/*
+	* 名称：调整线程池大小
+	* 描述：增加或减少线程池的工作线程数量
+	*		
+	* 参数：		dwNewThreadCount	-- 线程数量
+	*									>0 -> dwNewThreadCount
+	*									=0 -> (CPU核数 * 2 + 2)
+	*									<0 -> (CPU核数 * (-dwNewThreadCount))
+	* 返回值：	TRUE	-- 成功
+	*			FALSE	-- 失败，可通过 SYS_GetLastError() 获取错误代码
+	*/
+	virtual BOOL AdjustThreadCount(DWORD dwNewThreadCount)									= 0;
+
+	/*
+	* 名称：等待
+	* 描述：等待线程池组件停止运行
+	*		
+	* 参数：		dwMilliseconds	-- 超时时间（毫秒，默认：-1，永不超时）
+	* 返回值：	TRUE	-- 成功
+	*			FALSE	-- 失败，可通过 SYS_GetLastError() 获取错误代码
+	*/
+	virtual BOOL Wait(DWORD dwMilliseconds = INFINITE)										= 0;
+
+public:
+
+	/***********************************************************************/
+	/***************************** 属性访问方法 *****************************/
+
+	/* 检查线程池组件是否已启动 */
+	virtual BOOL HasStarted						()	= 0;
+	/* 查看线程池组件当前状态 */
+	virtual EnServiceState	GetState			()	= 0;
+	/* 获取当前任务等待队列大小 */
+	virtual DWORD GetQueueSize					()	= 0;
+	/* 获取当前正在执行的任务数量 */
+	virtual DWORD GetTaskCount					()	= 0;
+	/* 获取工作线程数量 */
+	virtual DWORD GetThreadCount				()	= 0;
+	/* 获取任务队列最大容量 */
+	virtual DWORD GetMaxQueueSize				()	= 0;
+	/* 获取任务拒绝处理策略 */
+	virtual EnRejectedPolicy GetRejectedPolicy	()	= 0;
+
+public:
+	virtual ~IHPThreadPool() = default;
+};

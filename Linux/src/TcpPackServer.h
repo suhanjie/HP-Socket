@@ -2,11 +2,11 @@
  * Copyright: JessMA Open Source (ldcsaa@gmail.com)
  *
  * Author	: Bruce Liang
- * Website	: http://www.jessma.org
- * Project	: https://github.com/ldcsaa
+ * Website	: https://github.com/ldcsaa
+ * Project	: https://github.com/ldcsaa/HP-Socket
  * Blog		: http://www.cnblogs.com/ldcsaa
  * Wiki		: http://www.oschina.net/p/hp-socket
- * QQ Group	: 75375912, 44636872
+ * QQ Group	: 44636872, 75375912
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -42,6 +42,7 @@ template<class T> class CTcpPackServerT : public IPackSocket, public T
 
 public:
 	using __super::Stop;
+	using __super::GetState;
 
 public:
 	virtual BOOL SendPackets(CONNID dwConnID, const WSABUF pBuffers[], int iCount)
@@ -49,8 +50,8 @@ public:
 		int iNewCount = iCount + 1;
 		unique_ptr<WSABUF[]> buffers(new WSABUF[iNewCount]);
 
-		DWORD header;
-		if(!::AddPackHeader(pBuffers, iCount, buffers, m_dwMaxPackSize, m_usHeaderFlag, header))
+		DWORD dwHeader;
+		if(!::AddPackHeader(pBuffers, iCount, buffers, m_dwMaxPackSize, m_usHeaderFlag, dwHeader))
 			return FALSE;
 
 		return __super::SendPackets(dwConnID, buffers.get(), iNewCount);
@@ -88,7 +89,6 @@ protected:
 
 		TBufferPackInfo* pInfo = nullptr;
 		GetConnectionReserved(pSocketObj, (PVOID*)&pInfo);
-		ASSERT(pInfo);
 
 		if(pInfo != nullptr)
 		{
@@ -106,6 +106,26 @@ protected:
 		m_bfPool.Clear();
 
 		return result;
+	}
+
+	virtual BOOL BeforeUnpause(TSocketObj* pSocketObj)
+	{
+		CReentrantCriSecLock locallock(pSocketObj->csIo);
+
+		if(!TSocketObj::IsValid(pSocketObj))
+			return FALSE;
+
+		if(pSocketObj->IsPaused())
+			return TRUE;
+
+		TBufferPackInfo* pInfo = nullptr;
+		GetConnectionReserved(pSocketObj, (PVOID*)&pInfo);
+		ASSERT(pInfo);
+
+		TBuffer* pBuffer = (TBuffer*)pInfo->pBuffer;
+		ASSERT(pBuffer && pBuffer->IsValid());
+
+		return (ParsePack(this, pInfo, pBuffer, pSocketObj, m_dwMaxPackSize, m_usHeaderFlag) != HR_ERROR);
 	}
 
 	virtual BOOL CheckParams()
@@ -134,8 +154,8 @@ protected:
 	}
 
 public:
-	virtual void SetMaxPackSize		(DWORD dwMaxPackSize)		{m_dwMaxPackSize = dwMaxPackSize;}
-	virtual void SetPackHeaderFlag	(USHORT usPackHeaderFlag)	{m_usHeaderFlag  = usPackHeaderFlag;}
+	virtual void SetMaxPackSize		(DWORD dwMaxPackSize)		{ENSURE_HAS_STOPPED(); m_dwMaxPackSize = dwMaxPackSize;}
+	virtual void SetPackHeaderFlag	(USHORT usPackHeaderFlag)	{ENSURE_HAS_STOPPED(); m_usHeaderFlag  = usPackHeaderFlag;}
 	virtual DWORD GetMaxPackSize	()							{return m_dwMaxPackSize;}
 	virtual USHORT GetPackHeaderFlag()							{return m_usHeaderFlag;}
 
@@ -144,7 +164,7 @@ private:
 		{return __super::DoFireReceive(pSocketObj, pData, iLength);}
 
 	friend EnHandleResult ParsePack<>	(CTcpPackServerT* pThis, TBufferPackInfo* pInfo, TBuffer* pBuffer, TSocketObj* pSocket,
-										DWORD dwMaxPackSize, USHORT usPackHeaderFlag, const BYTE* pData, int iLength);
+										DWORD dwMaxPackSize, USHORT usPackHeaderFlag);
 
 public:
 	CTcpPackServerT(ITcpServerListener* pListener)
@@ -157,7 +177,7 @@ public:
 
 	virtual ~CTcpPackServerT()
 	{
-		Stop();
+		ENSURE_STOP();
 	}
 
 private:

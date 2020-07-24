@@ -57,6 +57,9 @@
     <ClCompile Include="..\..\..\src\TcpPackAgent.cpp">
       <Filter>HPSocket</Filter>
     </ClCompile>
+    <ClCompile Include="..\..\..\src\common\Thread.cpp">
+      <Filter>Common</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\..\..\src\common\BufferPool.h">

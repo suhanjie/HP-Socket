@@ -2,11 +2,11 @@
  * Copyright: JessMA Open Source (ldcsaa@gmail.com)
  *
  * Author	: Bruce Liang
- * Website	: http://www.jessma.org
- * Project	: https://github.com/ldcsaa
+ * Website	: https://github.com/ldcsaa
+ * Project	: https://github.com/ldcsaa/HP-Socket
  * Blog		: http://www.cnblogs.com/ldcsaa
  * Wiki		: http://www.oschina.net/p/hp-socket
- * QQ Group	: 75375912, 44636872
+ * QQ Group	: 44636872, 75375912
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -34,9 +34,19 @@ template<class R, class T, USHORT default_port> class CHttpClientT : public R, p
 
 public:
 	using __super::Stop;
+	using __super::GetState;
 	using __super::SendPackets;
 	using __super::HasStarted;
 	using __super::GetRemoteHost;
+
+	using __super::IsSecure;
+	using __super::IsConnected;
+	using __super::FireHandShake;
+
+#ifdef _SSL_SUPPORT
+	using __super::IsSSLAutoHandShake;
+	using __super::StartSSLHandShakeNoCheck;
+#endif
 
 protected:
 	using __super::SetLastError;
@@ -47,6 +57,7 @@ protected:
 public:
 	virtual BOOL SendRequest(LPCSTR lpszMethod, LPCSTR lpszPath, const THeader lpHeaders[] = nullptr, int iHeaderCount = 0, const BYTE* pBody = nullptr, int iLength = 0);
 	virtual BOOL SendLocalFile(LPCSTR lpszFileName, LPCSTR lpszMethod, LPCSTR lpszPath, const THeader lpHeaders[] = nullptr, int iHeaderCount = 0);
+	virtual BOOL SendChunkData(const BYTE* pData = nullptr, int iLength = 0, LPCSTR lpszExtensions = nullptr);
 
 	virtual BOOL SendPost(LPCSTR lpszPath, const THeader lpHeaders[], int iHeaderCount, const BYTE* pBody, int iLength)
 		{return SendRequest(HTTP_METHOD_POST, lpszPath, lpHeaders, iHeaderCount, pBody, iLength);}
@@ -67,13 +78,17 @@ public:
 	virtual BOOL SendConnect(LPCSTR lpszHost, const THeader lpHeaders[] = nullptr, int iHeaderCount = 0)
 		{return SendRequest(HTTP_METHOD_CONNECT, lpszHost, lpHeaders, iHeaderCount);}
 
-	virtual BOOL SendWSMessage(BOOL bFinal, BYTE iReserved, BYTE iOperationCode, const BYTE lpszMask[4] = nullptr, BYTE* pData = nullptr, int iLength = 0, ULONGLONG ullBodyLen = 0);
+	virtual BOOL SendWSMessage(BOOL bFinal, BYTE iReserved, BYTE iOperationCode, const BYTE lpszMask[4], const BYTE* pData = nullptr, int iLength = 0, ULONGLONG ullBodyLen = 0);
+
+	virtual BOOL StartHttp();
 
 public:
-	virtual void SetUseCookie(BOOL bUseCookie)					{m_pCookieMgr = bUseCookie ? &g_CookieMgr : nullptr;}
-	virtual BOOL IsUseCookie()									{return m_pCookieMgr != nullptr;}
+	virtual void SetUseCookie(BOOL bUseCookie)					{ENSURE_HAS_STOPPED(); m_pCookieMgr		= bUseCookie ? &g_CookieMgr : nullptr;}
+	virtual void SetHttpAutoStart(BOOL bAutoStart)				{ENSURE_HAS_STOPPED(); m_bHttpAutoStart	= bAutoStart;}
+	virtual void SetLocalVersion(EnHttpVersion enLocalVersion)	{ENSURE_HAS_STOPPED(); m_enLocalVersion	= enLocalVersion;}
 
-	virtual void SetLocalVersion(EnHttpVersion enLocalVersion)	{m_enLocalVersion = enLocalVersion;}
+	virtual BOOL IsUseCookie()									{return m_pCookieMgr != nullptr;}
+	virtual BOOL IsHttpAutoStart()								{return m_bHttpAutoStart;}
 	virtual EnHttpVersion GetLocalVersion()						{return m_enLocalVersion;}
 
 	virtual BOOL IsUpgrade()
@@ -118,8 +133,28 @@ public:
 private:
 	virtual BOOL CheckParams();
 
+	void DoStartHttp()
+		{m_objHttp.SetValid(TRUE);}
+
+	virtual EnHandleResult FireConnect()
+		{return m_bHttpAutoStart ? __super::FireConnect() : __super::DoFireConnect(this);}
+
+	virtual EnHandleResult DoFireConnect(ITcpClient* pSender)
+	{
+		ASSERT(pSender == this);
+
+		DoStartHttp();
+
+		EnHandleResult result = __super::DoFireConnect(this);
+
+		if(result == HR_ERROR)
+			m_objHttp.SetValid(FALSE);
+
+		return result;
+	}
+
 	virtual EnHandleResult DoFireReceive(ITcpClient* pSender, const BYTE* pData, int iLength)
-		{ASSERT(pSender == this); return m_objHttp.Execute(pData, iLength);}
+		{ASSERT(pSender == this); return m_objHttp.IsValid() ? m_objHttp.Execute(pData, iLength) : __super::DoFireReceive(pSender, pData, iLength);}
 
 	EnHandleResult DoFireSuperReceive(IHttpClient* pSender, const BYTE* pData, int iLength)
 		{ASSERT(pSender == (IHttpClient*)this); return __super::DoFireReceive(pSender, pData, iLength);}
@@ -178,6 +213,7 @@ public:
 	: T					(pListener)
 	, m_pListener		(pListener)
 	, m_pCookieMgr		(&g_CookieMgr)
+	, m_bHttpAutoStart	(TRUE)
 	, m_enLocalVersion	(DEFAULT_HTTP_VERSION)
 	, m_objHttp			(FALSE, this, (IHttpClient*)this)
 	{
@@ -186,17 +222,20 @@ public:
 
 	virtual ~CHttpClientT()
 	{
-		Stop();
+		ENSURE_STOP();
 	}
 
-protected:
-	THttpObj				m_objHttp;
-
 private:
+	BOOL					m_bHttpAutoStart;
+
 	IHttpClientListener*	m_pListener;
 	CCookieMgr*				m_pCookieMgr;
 	EnHttpVersion			m_enLocalVersion;
 
+	CReentrantCriSec		m_csHttp;
+
+protected:
+	THttpObj				m_objHttp;
 };
 
 // ------------------------------------------------------------------------------------------------------------- //
@@ -215,12 +254,13 @@ public:
 	using __super::HasStarted;
 	using __super::GetRemoteHost;
 	using __super::SendLocalFile;
+	using __super::IsHttpAutoStart;
 
 public:
-	virtual BOOL Start(LPCTSTR lpszRemoteAddress, USHORT usPort, BOOL bAsyncConnect = TRUE, LPCTSTR lpszBindAddress = nullptr);
+	virtual BOOL Start(LPCTSTR lpszRemoteAddress, USHORT usPort, BOOL bAsyncConnect = TRUE, LPCTSTR lpszBindAddress = nullptr, USHORT usLocalPort = 0);
 public:
 	virtual BOOL SendRequest(LPCSTR lpszMethod, LPCSTR lpszPath, const THeader lpHeaders[] = nullptr, int iHeaderCount = 0, const BYTE* pBody = nullptr, int iLength = 0);
-	virtual BOOL SendWSMessage(BOOL bFinal, BYTE iReserved, BYTE iOperationCode, const BYTE lpszMask[4] = nullptr, BYTE* pData = nullptr, int iLength = 0, ULONGLONG ullBodyLen = 0);
+	virtual BOOL SendWSMessage(BOOL bFinal, BYTE iReserved, BYTE iOperationCode, const BYTE lpszMask[4] = nullptr, const BYTE* pData = nullptr, int iLength = 0, ULONGLONG ullBodyLen = 0);
 
 public:
 	virtual BOOL IsUpgrade()
@@ -269,8 +309,8 @@ public:
 public:
 	virtual BOOL GetResponseBody	(LPCBYTE* lpszBody, int* iLength);
 
-	virtual void SetConnectTimeout	(DWORD dwConnectTimeout)	{m_dwConnectTimeout = dwConnectTimeout;}
-	virtual void SetRequestTimeout	(DWORD dwRequestTimeout)	{m_dwRequestTimeout = dwRequestTimeout;}
+	virtual void SetConnectTimeout	(DWORD dwConnectTimeout)	{ENSURE_HAS_STOPPED(); m_dwConnectTimeout = dwConnectTimeout;}
+	virtual void SetRequestTimeout	(DWORD dwRequestTimeout)	{ENSURE_HAS_STOPPED(); m_dwRequestTimeout = dwRequestTimeout;}
 
 	virtual DWORD GetConnectTimeout	()	{return m_dwConnectTimeout;}
 	virtual DWORD GetRequestTimeout	()	{return m_dwRequestTimeout;}
@@ -290,6 +330,7 @@ private:
 	virtual EnHandleResult OnPrepareConnect(ITcpClient* pSender, CONNID dwConnID, SOCKET socket);
 	virtual EnHandleResult OnConnect(ITcpClient* pSender, CONNID dwConnID);
 	virtual EnHandleResult OnSend(ITcpClient* pSender, CONNID dwConnID, const BYTE* pData, int iLength);
+	virtual EnHandleResult OnReceive(ITcpClient* pSender, CONNID dwConnID, const BYTE* pData, int iLength);
 
 	virtual EnHttpParseResult OnMessageBegin(IHttpClient* pSender, CONNID dwConnID);
 	virtual EnHttpParseResult OnStatusLine(IHttpClient* pSender, CONNID dwConnID, USHORT usStatusCode, LPCSTR lpszDesc);

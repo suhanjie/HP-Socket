@@ -16,6 +16,9 @@
     <Filter Include="Common\Crypto">
       <UniqueIdentifier>{755b1b75-9d38-4e86-926f-8a955faf20b6}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Common\Http">
+      <UniqueIdentifier>{657927e1-aeae-409e-9bcf-15e3e4057527}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="client.cpp">
@@ -71,6 +74,12 @@
     </ClCompile>
     <ClCompile Include="..\..\..\src\SSLHelper.cpp">
       <Filter>HPSocket</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\..\src\common\Thread.cpp">
+      <Filter>Common</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\..\src\common\http\http_parser.c">
+      <Filter>Common\Http</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
@@ -169,6 +178,9 @@
     </ClInclude>
     <ClInclude Include="..\..\..\src\SSLHelper.h">
       <Filter>HPSocket</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\..\src\common\http\http_parser.h">
+      <Filter>Common\Http</Filter>
     </ClInclude>
   </ItemGroup>
 </Project>

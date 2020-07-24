@@ -2,11 +2,11 @@
  * Copyright: JessMA Open Source (ldcsaa@gmail.com)
  *
  * Author	: Bruce Liang
- * Website	: http://www.jessma.org
- * Project	: https://github.com/ldcsaa
+ * Website	: https://github.com/ldcsaa
+ * Project	: https://github.com/ldcsaa/HP-Socket
  * Blog		: http://www.cnblogs.com/ldcsaa
  * Wiki		: http://www.oschina.net/p/hp-socket
- * QQ Group	: 75375912, 44636872
+ * QQ Group	: 44636872, 75375912
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,6 +24,10 @@
 #include "HttpHelper.h"
 
 #ifdef _HTTP_SUPPORT
+
+#if !defined(z_const)
+	#define z_const
+#endif
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -235,6 +239,53 @@ void MakeHttpPacket(const CStringA& strHeader, const BYTE* pBody, int iLength, W
 	szBuffer[1].len = iLength;
 }
 
+int MakeChunkPackage(const BYTE* pData, int iLength, LPCSTR lpszExtensions, char szLen[12], WSABUF bufs[5])
+{
+	ASSERT(iLength == 0 || pData != nullptr);
+
+	int i = 0;
+
+	if(::IsStrEmptyA(lpszExtensions))
+	{
+		sprintf(szLen, "%x" HTTP_CRLF, iLength);
+
+		bufs[i].buf = (LPBYTE)szLen;
+		bufs[i].len = (int)strlen(szLen);
+		++i;
+	}
+	else
+	{
+		LPCSTR lpszSep = lpszExtensions[0] == ';' ? " " : " ;";
+
+		sprintf(szLen, "%x%s", iLength, lpszSep);
+
+		bufs[i].buf = (LPBYTE)szLen;
+		bufs[i].len = (int)strlen(szLen);
+		++i;
+
+		bufs[i].buf = (LPBYTE)lpszExtensions;
+		bufs[i].len = (int)strlen(lpszExtensions);
+		++i;
+
+		bufs[i].buf = (LPBYTE)HTTP_CRLF;
+		bufs[i].len = 2;
+		++i;
+	}
+
+	if(iLength > 0)
+	{
+		bufs[i].buf = (LPBYTE)pData;
+		bufs[i].len = iLength;
+		++i;
+	}
+
+	bufs[i].buf = (LPBYTE)HTTP_CRLF;
+	bufs[i].len = 2;
+	++i;
+
+	return i;
+}
+
 BOOL MakeWSPacket(BOOL bFinal, BYTE iReserved, BYTE iOperationCode, const BYTE lpszMask[4], BYTE* pData, int iLength, ULONGLONG ullBodyLen, BYTE szHeader[HTTP_MAX_WS_HEADER_LEN], WSABUF szBuffer[2])
 {
 	ULONGLONG ullLength = (ULONGLONG)iLength;
@@ -381,108 +432,6 @@ BOOL ParseUrl(const CStringA& strUrl, BOOL& bHttps, CStringA& strHost, USHORT& u
 		usPort = (USHORT)::atoi(strPort);
 
 	return TRUE;
-}
-
-int Compress(const BYTE* lpszSrc, DWORD dwSrcLen, BYTE* lpszDest, DWORD& dwDestLen)
-{
-	return CompressEx(lpszSrc, dwSrcLen, lpszDest, dwDestLen);
-}
-
-int CompressEx(const BYTE* lpszSrc, DWORD dwSrcLen, BYTE* lpszDest, DWORD& dwDestLen, int iLevel, int iMethod, int iWindowBits, int iMemLevel, int iStrategy)
-{
-	z_stream stream;
-
-	stream.next_in	 = (z_const Bytef*)lpszSrc;
-	stream.avail_in	 = dwSrcLen;
-	stream.next_out	 = lpszDest;
-	stream.avail_out = dwDestLen;
-	stream.zalloc	 = nullptr;
-	stream.zfree	 = nullptr;
-	stream.opaque	 = nullptr;
-
-	int err = ::deflateInit2(&stream, iLevel, iMethod, iWindowBits, iMemLevel, iStrategy);
-
-	if(err != Z_OK) return err;
-
-	err = ::deflate(&stream, Z_FINISH);
-
-	if(err != Z_STREAM_END)
-	{
-		::deflateEnd(&stream);
-		return err == Z_OK ? Z_BUF_ERROR : err;
-	}
-
-	if(dwDestLen > stream.total_out)
-	{
-		lpszDest[stream.total_out]	= 0;
-		dwDestLen					= (DWORD)stream.total_out;
-	}
-
-	return ::deflateEnd(&stream);
-}
-
-int Uncompress(const BYTE* lpszSrc, DWORD dwSrcLen, BYTE* lpszDest, DWORD& dwDestLen)
-{
-	return UncompressEx(lpszSrc, dwSrcLen, lpszDest, dwDestLen);
-}
-
-int UncompressEx(const BYTE* lpszSrc, DWORD dwSrcLen, BYTE* lpszDest, DWORD& dwDestLen, int iWindowBits)
-{
-	z_stream stream;
-
-	stream.next_in	 = (z_const Bytef*)lpszSrc;
-	stream.avail_in	 = (uInt)dwSrcLen;
-	stream.next_out	 = lpszDest;
-	stream.avail_out = dwDestLen;
-	stream.zalloc	 = nullptr;
-	stream.zfree	 = nullptr;
-
-	int err = ::inflateInit2(&stream, iWindowBits);
-
-	if(err != Z_OK) return err;
-
-	err = ::inflate(&stream, Z_FINISH);
-
-	if(err != Z_STREAM_END)
-	{
-		::inflateEnd(&stream);
-		return (err == Z_NEED_DICT || (err == Z_BUF_ERROR && stream.avail_in == 0)) ? Z_DATA_ERROR : err;
-	}
-
-	if(dwDestLen > stream.total_out)
-	{
-		lpszDest[stream.total_out]	= 0;
-		dwDestLen					= (DWORD)stream.total_out;
-	}
-
-	return inflateEnd(&stream);
-}
-
-DWORD GuessCompressBound(DWORD dwSrcLen, BOOL bGZip)
-{
-	DWORD dwBound = (DWORD)::compressBound(dwSrcLen);
-	
-	if(bGZip) dwBound += 11;
-
-	return dwBound;
-}
-
-int GZipCompress(const BYTE* lpszSrc, DWORD dwSrcLen, BYTE* lpszDest, DWORD& dwDestLen)
-{
-	return CompressEx(lpszSrc, dwSrcLen, lpszDest, dwDestLen, Z_DEFAULT_COMPRESSION, Z_DEFLATED, MAX_WBITS + 16);
-}
-
-int GZipUncompress(const BYTE* lpszSrc, DWORD dwSrcLen, BYTE* lpszDest, DWORD& dwDestLen)
-{
-	return UncompressEx(lpszSrc, dwSrcLen, lpszDest, dwDestLen, MAX_WBITS + 32);
-}
-
-DWORD GZipGuessUncompressBound(const BYTE* lpszSrc, DWORD dwSrcLen)
-{
-	if(dwSrcLen < 20 || *(USHORT*)lpszSrc != 0x8B1F)
-		return 0;
-
-	return *(DWORD*)(lpszSrc + dwSrcLen - 4);
 }
 
 #endif

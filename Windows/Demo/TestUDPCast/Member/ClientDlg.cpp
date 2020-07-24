@@ -50,8 +50,6 @@ BEGIN_MESSAGE_MAP(CClientDlg, CDialogEx)
 	ON_BN_CLICKED(IDC_STOP, &CClientDlg::OnBnClickedStop)
 	ON_MESSAGE(USER_INFO_MSG, OnUserInfoMsg)
 	ON_WM_VKEYTOITEM()
-	ON_BN_CLICKED(IDC_MULTI_MODE, &CClientDlg::OnBnClickedMultiMode)
-	ON_BN_CLICKED(IDC_BROAD_MODE, &CClientDlg::OnBnClickedBroadMode)
 END_MESSAGE_MAP()
 
 
@@ -75,7 +73,7 @@ BOOL CClientDlg::OnInitDialog()
 	m_TTL.SetWindowText(DEFAULT_TTL);
 	m_CastMode.SetCheck(BST_CHECKED);
 	m_IPLoop.SetCheck(BST_CHECKED);
-	m_ReuseAddr.SetCheck(BST_UNCHECKED);
+	m_ReuseAddr.SetCheck(BST_CHECKED);
 
 	::SetMainWnd(this);
 	::SetInfoList(&m_Info);
@@ -142,8 +140,8 @@ void CClientDlg::SetAppState(EnAppState state)
 
 	m_Start.EnableWindow(m_enState == ST_STOPPED);
 	m_Stop.EnableWindow(m_enState == ST_STARTED);
-	m_Send.EnableWindow(m_enState == ST_STARTED && m_Content.GetWindowTextLength() > 0);
-	m_CastAddr.EnableWindow(m_enState == ST_STOPPED && m_CastMode.GetCheck() == BST_CHECKED);
+	m_Send.EnableWindow(m_enState == ST_STARTED);
+	m_CastAddr.EnableWindow(m_enState == ST_STOPPED);
 	m_BindAddr.EnableWindow(m_enState == ST_STOPPED);
 	m_Port.EnableWindow(m_enState == ST_STOPPED);
 	m_TTL.EnableWindow(m_enState == ST_STOPPED);
@@ -155,17 +153,7 @@ void CClientDlg::SetAppState(EnAppState state)
 
 void CClientDlg::OnEnChangeContent()
 {
-	m_Send.EnableWindow(m_enState == ST_STARTED && m_Content.GetWindowTextLength() > 0);
-}
-
-void CClientDlg::OnBnClickedMultiMode()
-{
-	m_CastAddr.EnableWindow(m_enState == ST_STOPPED && m_CastMode.GetCheck() == BST_CHECKED);
-}
-
-void CClientDlg::OnBnClickedBroadMode()
-{
-	m_CastAddr.EnableWindow(m_enState == ST_STOPPED && m_CastMode.GetCheck() == BST_CHECKED);
+	m_Send.EnableWindow(m_enState == ST_STARTED);
 }
 
 void CClientDlg::OnBnClickedSend()
@@ -209,7 +197,7 @@ void CClientDlg::OnBnClickedStart()
 	// OPTIONS ...
 	m_Cast.SetCastMode(enMode);
 	m_Cast.SetMultiCastLoop(bIPLoop);
-	m_Cast.SetReuseAddress(bReuseAddr);
+	m_Cast.SetReuseAddressPolicy(bReuseAddr ? RAP_ADDR_AND_PORT : RAP_NONE);
 	m_Cast.SetMultiCastTtl(iTTL);
 
 	::LogClientStarting(strCastAddress, usPort);

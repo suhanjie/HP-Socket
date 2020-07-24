@@ -2,11 +2,11 @@
  * Copyright: JessMA Open Source (ldcsaa@gmail.com)
  *
  * Author	: Bruce Liang
- * Website	: http://www.jessma.org
- * Project	: https://github.com/ldcsaa
+ * Website	: https://github.com/ldcsaa
+ * Project	: https://github.com/ldcsaa/HP-Socket
  * Blog		: http://www.cnblogs.com/ldcsaa
  * Wiki		: http://www.oschina.net/p/hp-socket
- * QQ Group	: 75375912, 44636872
+ * QQ Group	: 44636872, 75375912
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -26,14 +26,17 @@
 #include "SocketHelper.h"
 #include "./common/GeneralHelper.h"
 
+#ifdef _UDP_SUPPORT
+
 class CUdpClient : public IUdpClient
 {
 public:
-	virtual BOOL Start	(LPCTSTR lpszRemoteAddress, USHORT usPort, BOOL bAsyncConnect = TRUE, LPCTSTR lpszBindAddress = nullptr);
+	virtual BOOL Start	(LPCTSTR lpszRemoteAddress, USHORT usPort, BOOL bAsyncConnect = TRUE, LPCTSTR lpszBindAddress = nullptr, USHORT usLocalPort = 0);
 	virtual BOOL Stop	();
-	virtual BOOL Send	(const BYTE* pBuffer, int iLength, int iOffset = 0);
+	virtual BOOL Send	(const BYTE* pBuffer, int iLength, int iOffset = 0)	{return DoSend(pBuffer, iLength, iOffset);}
 	virtual BOOL SendPackets	(const WSABUF pBuffers[], int iCount);
 	virtual BOOL PauseReceive	(BOOL bPause = TRUE);
+	virtual BOOL Wait			(DWORD dwMilliseconds = INFINITE) {return m_evWait.WaitFor(dwMilliseconds, CStopWaitingPredicate<IClient>(this));}
 	virtual BOOL			HasStarted			()	{return m_enState == SS_STARTED || m_enState == SS_STARTING;}
 	virtual EnServiceState	GetState			()	{return m_enState;}
 	virtual CONNID			GetConnectionID		()	{return m_dwConnID;};
@@ -44,17 +47,20 @@ public:
 	virtual BOOL GetRemoteHost			(TCHAR lpszHost[], int& iHostLen, USHORT& usPort);
 	virtual BOOL GetPendingDataLength	(int& iPending) {iPending = m_lsSend.Length(); return HasStarted();}
 	virtual BOOL IsPauseReceive			(BOOL& bPaused) {bPaused = m_bPaused; return HasStarted();}
+	virtual BOOL IsConnected			()				{return m_bConnected;}
 
 public:
 	virtual BOOL IsSecure				() {return FALSE;}
 
-	virtual void SetMaxDatagramSize		(DWORD dwMaxDatagramSize)		{m_dwMaxDatagramSize	= dwMaxDatagramSize;}
-	virtual void SetDetectAttempts		(DWORD dwDetectAttempts)		{m_dwDetectAttempts		= dwDetectAttempts;}
-	virtual void SetDetectInterval		(DWORD dwDetectInterval)		{m_dwDetectInterval		= dwDetectInterval;}
-	virtual void SetFreeBufferPoolSize	(DWORD dwFreeBufferPoolSize)	{m_dwFreeBufferPoolSize = dwFreeBufferPoolSize;}
-	virtual void SetFreeBufferPoolHold	(DWORD dwFreeBufferPoolHold)	{m_dwFreeBufferPoolHold = dwFreeBufferPoolHold;}
-	virtual void SetExtra				(PVOID pExtra)					{m_pExtra				= pExtra;}						
+	virtual void SetReuseAddressPolicy	(EnReuseAddressPolicy enReusePolicy){ENSURE_HAS_STOPPED(); m_enReusePolicy			= enReusePolicy;}
+	virtual void SetMaxDatagramSize		(DWORD dwMaxDatagramSize)			{ENSURE_HAS_STOPPED(); m_dwMaxDatagramSize		= dwMaxDatagramSize;}
+	virtual void SetDetectAttempts		(DWORD dwDetectAttempts)			{ENSURE_HAS_STOPPED(); m_dwDetectAttempts		= dwDetectAttempts;}
+	virtual void SetDetectInterval		(DWORD dwDetectInterval)			{ENSURE_HAS_STOPPED(); m_dwDetectInterval		= dwDetectInterval;}
+	virtual void SetFreeBufferPoolSize	(DWORD dwFreeBufferPoolSize)		{ENSURE_HAS_STOPPED(); m_dwFreeBufferPoolSize	= dwFreeBufferPoolSize;}
+	virtual void SetFreeBufferPoolHold	(DWORD dwFreeBufferPoolHold)		{ENSURE_HAS_STOPPED(); m_dwFreeBufferPoolHold	= dwFreeBufferPoolHold;}
+	virtual void SetExtra				(PVOID pExtra)						{m_pExtra										= pExtra;}						
 
+	virtual EnReuseAddressPolicy GetReuseAddressPolicy	()	{return m_enReusePolicy;}
 	virtual DWORD GetMaxDatagramSize	()	{return m_dwMaxDatagramSize;}
 	virtual DWORD GetDetectAttempts		()	{return m_dwDetectAttempts;}
 	virtual DWORD GetDetectInterval		()	{return m_dwDetectInterval;}
@@ -64,30 +70,52 @@ public:
 
 protected:
 	virtual EnHandleResult FirePrepareConnect(SOCKET socket)
-		{return m_pListener->OnPrepareConnect(this, m_dwConnID, socket);}
+		{return DoFirePrepareConnect(this, socket);}
 	virtual EnHandleResult FireConnect()
 		{
-			EnHandleResult rs		= m_pListener->OnConnect(this, m_dwConnID);
+			EnHandleResult rs		= DoFireConnect(this);
 			if(rs != HR_ERROR) rs	= FireHandShake();
 			return rs;
 		}
 	virtual EnHandleResult FireHandShake()
-		{return m_pListener->OnHandShake(this, m_dwConnID);}
+		{return DoFireHandShake(this);}
 	virtual EnHandleResult FireSend(const BYTE* pData, int iLength)
-		{return m_pListener->OnSend(this, m_dwConnID, pData, iLength);}
+		{return DoFireSend(this, pData, iLength);}
 	virtual EnHandleResult FireReceive(const BYTE* pData, int iLength)
-		{return m_pListener->OnReceive(this, m_dwConnID, pData, iLength);}
+		{return DoFireReceive(this, pData, iLength);}
 	virtual EnHandleResult FireReceive(int iLength)
-		{return m_pListener->OnReceive(this, m_dwConnID, iLength);}
+		{return DoFireReceive(this, iLength);}
 	virtual EnHandleResult FireClose(EnSocketOperation enOperation, int iErrorCode)
-		{return m_pListener->OnClose(this, m_dwConnID, enOperation, iErrorCode);}
+		{return DoFireClose(this, enOperation, iErrorCode);}
+
+	virtual EnHandleResult DoFirePrepareConnect(IUdpClient* pSender, SOCKET socket)
+		{return m_pListener->OnPrepareConnect(pSender, pSender->GetConnectionID(), socket);}
+	virtual EnHandleResult DoFireConnect(IUdpClient* pSender)
+		{return m_pListener->OnConnect(pSender, pSender->GetConnectionID());}
+	virtual EnHandleResult DoFireHandShake(IUdpClient* pSender)
+		{return m_pListener->OnHandShake(pSender, pSender->GetConnectionID());}
+	virtual EnHandleResult DoFireSend(IUdpClient* pSender, const BYTE* pData, int iLength)
+		{return m_pListener->OnSend(pSender, pSender->GetConnectionID(), pData, iLength);}
+	virtual EnHandleResult DoFireReceive(IUdpClient* pSender, const BYTE* pData, int iLength)
+		{return m_pListener->OnReceive(pSender, pSender->GetConnectionID(), pData, iLength);}
+	virtual EnHandleResult DoFireReceive(IUdpClient* pSender, int iLength)
+		{return m_pListener->OnReceive(pSender, pSender->GetConnectionID(), iLength);}
+	virtual EnHandleResult DoFireClose(IUdpClient* pSender, EnSocketOperation enOperation, int iErrorCode)
+		{return m_pListener->OnClose(pSender, pSender->GetConnectionID(), enOperation, iErrorCode);}
 
 	void SetLastError(EnSocketError code, LPCSTR func, int ec);
 	virtual BOOL CheckParams();
 	virtual void PrepareStart();
 	virtual void Reset();
 
+	virtual void OnWorkerThreadStart(THR_ID tid) {}
 	virtual void OnWorkerThreadEnd(THR_ID tid) {}
+
+	virtual FD GetUserEvent() {return INVALID_FD;}
+	virtual BOOL OnUserEvent() {return TRUE;}
+
+	static BOOL DoSend(CUdpClient* pClient, const BYTE* pBuffer, int iLength, int iOffset = 0)
+		{return pClient->DoSend(pBuffer, iLength, iOffset);}
 
 protected:
 	void SetReserved	(PVOID pReserved)	{m_pReserved = pReserved;}						
@@ -95,28 +123,29 @@ protected:
 	BOOL GetRemoteHost	(LPCSTR* lpszHost, USHORT* pusPort = nullptr);
 
 private:
+	BOOL DoSend			(const BYTE* pBuffer, int iLength, int iOffset = 0);
+
 	void SetRemoteHost	(LPCTSTR lpszHost, USHORT usPort);
+	void SetConnected	(BOOL bConnected = TRUE) {m_bConnected = bConnected; if(bConnected) m_enState = SS_STARTED;}
 
 	BOOL CheckStarting();
 	BOOL CheckStoping();
 	BOOL CreateClientSocket(LPCTSTR lpszRemoteAddress, HP_SOCKADDR& addrRemote, USHORT usPort, LPCTSTR lpszBindAddress, HP_SOCKADDR& addrBind);
-	BOOL BindClientSocket(const HP_SOCKADDR& addrBind);
+	BOOL BindClientSocket(const HP_SOCKADDR& addrBind, const HP_SOCKADDR& addrRemote, USHORT usLocalPort);
 	BOOL ConnectToServer(const HP_SOCKADDR& addrRemote, BOOL bAsyncConnect);
 	BOOL CreateWorkerThread();
 	BOOL ProcessNetworkEvent(SHORT events);
 	BOOL ReadData();
 	BOOL SendData();
-	BOOL DoSendData(TItem* pItem);
+	BOOL DoSendData(TItem* pItem, BOOL& bBlocked);
 	int SendInternal(TItemPtr& itPtr);
 	void WaitForWorkerThreadEnd();
+	void CheckConnected();
 
 	BOOL HandleConnect	(SHORT events);
 	BOOL HandleClose	(SHORT events);
 	BOOL HandleRead		(SHORT events);
 	BOOL HandleWrite	(SHORT events);
-
-	void SetConnected	() {m_bConnected = TRUE; m_enState = SS_STARTED;}
-	BOOL HasConnected	() {return m_bConnected;}
 
 	BOOL CheckConnection	();
 	BOOL DetectConnection	();
@@ -139,6 +168,7 @@ public:
 	, m_dwDetectFails		(0)
 	, m_pExtra				(nullptr)
 	, m_pReserved			(nullptr)
+	, m_enReusePolicy		(RAP_ADDR_ONLY)
 	, m_dwMaxDatagramSize	(DEFAULT_UDP_MAX_DATAGRAM_SIZE)
 	, m_dwFreeBufferPoolSize(DEFAULT_CLIENT_FREE_BUFFER_POOL_SIZE)
 	, m_dwFreeBufferPoolHold(DEFAULT_CLIENT_FREE_BUFFER_POOL_HOLD)
@@ -150,10 +180,12 @@ public:
 
 	virtual ~CUdpClient()
 	{
-		Stop();
+		ENSURE_STOP();
 	}
 
 private:
+	CSEM				m_evWait;
+
 	IUdpClientListener*	m_pListener;
 	TClientCloseContext m_ccContext;
 
@@ -161,6 +193,7 @@ private:
 	SHORT				m_nEvents;
 	CONNID				m_dwConnID;
 
+	EnReuseAddressPolicy m_enReusePolicy;
 	DWORD				m_dwMaxDatagramSize;
 	DWORD				m_dwFreeBufferPoolSize;
 	DWORD				m_dwFreeBufferPoolHold;
@@ -191,10 +224,11 @@ private:
 	CEvt				m_evSend;
 	CEvt				m_evRecv;
 	CEvt				m_evStop;
-	CTimerEvent			m_evDetect;
 
 	DWORD				m_dwDetectFails;
 	volatile BOOL		m_bPaused;
 
 	CThread<CUdpClient, VOID, UINT> m_thWorker;
 };
+
+#endif

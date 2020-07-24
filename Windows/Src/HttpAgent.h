@@ -2,11 +2,11 @@
  * Copyright: JessMA Open Source (ldcsaa@gmail.com)
  *
  * Author	: Bruce Liang
- * Website	: http://www.jessma.org
- * Project	: https://github.com/ldcsaa
+ * Website	: https://github.com/ldcsaa
+ * Project	: https://github.com/ldcsaa/HP-Socket/HP-Socket
  * Blog		: http://www.cnblogs.com/ldcsaa
  * Wiki		: http://www.oschina.net/p/hp-socket
- * QQ Group	: 75375912, 44636872
+ * QQ Group	: 44636872, 75375912
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -38,6 +38,7 @@ protected:
 public:
 	virtual BOOL SendRequest(CONNID dwConnID, LPCSTR lpszMethod, LPCSTR lpszPath, const THeader lpHeaders[] = nullptr, int iHeaderCount = 0, const BYTE* pBody = nullptr, int iLength = 0);
 	virtual BOOL SendLocalFile(CONNID dwConnID, LPCSTR lpszFileName, LPCSTR lpszMethod, LPCSTR lpszPath, const THeader lpHeaders[] = nullptr, int iHeaderCount = 0);
+	virtual BOOL SendChunkData(CONNID dwConnID, const BYTE* pData = nullptr, int iLength = 0, LPCSTR lpszExtensions = nullptr);
 
 	virtual BOOL SendPost(CONNID dwConnID, LPCSTR lpszPath, const THeader lpHeaders[], int iHeaderCount, const BYTE* pBody, int iLength)
 		{return SendRequest(dwConnID, HTTP_METHOD_POST, lpszPath, lpHeaders, iHeaderCount, pBody, iLength);}
@@ -58,13 +59,17 @@ public:
 	virtual BOOL SendConnect(CONNID dwConnID, LPCSTR lpszHost, const THeader lpHeaders[] = nullptr, int iHeaderCount = 0)
 		{return SendRequest(dwConnID, HTTP_METHOD_CONNECT, lpszHost, lpHeaders, iHeaderCount);}
 
-	virtual BOOL SendWSMessage(CONNID dwConnID, BOOL bFinal, BYTE iReserved, BYTE iOperationCode, const BYTE lpszMask[4] = nullptr, BYTE* pData = nullptr, int iLength = 0, ULONGLONG ullBodyLen = 0);
+	virtual BOOL SendWSMessage(CONNID dwConnID, BOOL bFinal, BYTE iReserved, BYTE iOperationCode, const BYTE lpszMask[4], const BYTE* pData = nullptr, int iLength = 0, ULONGLONG ullBodyLen = 0);
+
+	virtual BOOL StartHttp(CONNID dwConnID);
 
 public:
-	virtual void SetUseCookie(BOOL bUseCookie)					{m_pCookieMgr = bUseCookie ? &g_CookieMgr : nullptr;}
-	virtual BOOL IsUseCookie()									{return m_pCookieMgr != nullptr;}
+	virtual void SetUseCookie(BOOL bUseCookie)					{ENSURE_HAS_STOPPED(); m_pCookieMgr		= bUseCookie ? &g_CookieMgr : nullptr;}
+	virtual void SetHttpAutoStart(BOOL bAutoStart)				{ENSURE_HAS_STOPPED(); m_bHttpAutoStart	= bAutoStart;}
+	virtual void SetLocalVersion(EnHttpVersion enLocalVersion)	{ENSURE_HAS_STOPPED(); m_enLocalVersion	= enLocalVersion;}
 
-	virtual void SetLocalVersion(EnHttpVersion enLocalVersion)	{m_enLocalVersion = enLocalVersion;}
+	virtual BOOL IsUseCookie()									{return m_pCookieMgr != nullptr;}
+	virtual BOOL IsHttpAutoStart()								{return m_bHttpAutoStart;}
 	virtual EnHttpVersion GetLocalVersion()						{return m_enLocalVersion;}
 
 	virtual BOOL IsUpgrade(CONNID dwConnID);
@@ -90,8 +95,13 @@ public:
 	virtual BOOL GetWSMessageState(CONNID dwConnID, BOOL* lpbFinal, BYTE* lpiReserved, BYTE* lpiOperationCode, LPCBYTE* lpszMask, ULONGLONG* lpullBodyLen, ULONGLONG* lpullBodyRemain);
 
 private:
+	BOOL StartHttp(TSocketObj* pSocketObj);
+	THttpObj* DoStartHttp(TSocketObj* pSocketObj);
+
+private:
 	virtual BOOL CheckParams();
 	virtual void PrepareStart();
+	virtual EnHandleResult FireConnect(TSocketObj* pSocketObj);
 	virtual EnHandleResult DoFireConnect(TSocketObj* pSocketObj);
 	virtual EnHandleResult DoFireHandShake(TSocketObj* pSocketObj);
 	virtual EnHandleResult DoFireReceive(TSocketObj* pSocketObj, const BYTE* pData, int iLength);
@@ -142,6 +152,7 @@ public:
 	: T					(pListener)
 	, m_pListener		(pListener)
 	, m_pCookieMgr		(&g_CookieMgr)
+	, m_bHttpAutoStart	(TRUE)
 	, m_enLocalVersion	(DEFAULT_HTTP_VERSION)
 	{
 
@@ -149,13 +160,16 @@ public:
 
 	virtual ~CHttpAgentT()
 	{
-		Stop();
+		ENSURE_STOP();
 	}
 
 private:
 	IHttpAgentListener*	m_pListener;
+
 	CCookieMgr*			m_pCookieMgr;
 	EnHttpVersion		m_enLocalVersion;
+
+	BOOL				m_bHttpAutoStart;
 
 	CHttpObjPool		m_objPool;
 };
